@@ -25,6 +25,12 @@ the system WKWebView — so there's no bundled browser and the app stays small.
 - **The classics** — line numbers, word wrap toggle, go-to-line, zoom,
   current-line highlight, bracket matching, line/column/selection status bar,
   Windows/Unix line-ending detection (preserved on save)
+- **PDF viewing** — open a `.pdf` and it renders in a read-only tab
+  ([PDF.js](https://mozilla.github.io/pdf.js/), vendored, works offline):
+  page navigation, zoom/fit-width, ⌘L go-to-page, text selection, and ⌘F
+  search with highlighting across pages. **File → Open PDF as Text** (or the
+  *Open as Text* button) extracts all the text into a normal editable tab.
+  PDF tabs restore with your last page and zoom, like everything else.
 
 ## Run it (quick start)
 
@@ -64,7 +70,7 @@ app.py            # Python shell: native window, file dialogs, disk I/O, session
 ui/index.html     # the interface
 ui/css/style.css  # classic Notepad++ styling
 ui/js/app.js      # tabs, find/replace, menus, session logic
-ui/vendor/        # CodeMirror 5 (vendored, no network needed)
+ui/vendor/        # CodeMirror 5 + PDF.js (vendored, no network needed)
 build_app.sh      # makes dist/Notepad--.app with PyInstaller
 ```
 

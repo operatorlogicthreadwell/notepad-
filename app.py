@@ -7,6 +7,7 @@ Run:            python3 app.py            (add --debug for web inspector)
 Build .app:     ./build_app.sh
 """
 
+import base64
 import json
 import os
 import sys
@@ -73,6 +74,15 @@ class Api:
             text = raw.decode("latin-1")
             encoding = "ANSI"
         return {"content": text, "encoding": encoding}
+
+    def read_file_b64(self, path):
+        """Binary read for non-text documents (PDFs), base64-encoded."""
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError as exc:
+            return {"error": str(exc)}
+        return {"data": base64.b64encode(raw).decode("ascii")}
 
     def write_file(self, path, content):
         try:

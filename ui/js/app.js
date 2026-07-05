@@ -47,7 +47,11 @@
         inp.onchange = async () => {
           const out = [];
           for (const f of inp.files) {
-            out.push({ shimName: f.name, shimContent: await f.text() });
+            if (/\.pdf$/i.test(f.name)) {
+              out.push({ shimName: f.name, shimPdfBytes: new Uint8Array(await f.arrayBuffer()) });
+            } else {
+              out.push({ shimName: f.name, shimContent: await f.text() });
+            }
           }
           resolve(out);
         };
@@ -57,6 +61,11 @@
 
     async readFile(path) {
       if (!this.isShim) return this.api.read_file(path);
+      return { error: "File system unavailable in browser demo" };
+    },
+
+    async readFileB64(path) {
+      if (!this.isShim) return this.api.read_file_b64(path);
       return { error: "File system unavailable in browser demo" };
     },
 
@@ -81,6 +90,7 @@
     },
 
     async saveSession(s) {
+      if (!this.isShim && !this.api) return { error: "not ready" };
       if (!this.isShim) return this.api.save_session(s);
       localStorage.setItem("npp-session", JSON.stringify(s));
       return { ok: true };
@@ -185,25 +195,35 @@
   }
 
   function isDirty(tab) {
+    if (tab.type === "pdf") return false;
     return tab.cleanGen === -1 || !tab.doc.isClean(tab.cleanGen);
   }
 
   function activateTab(tab) {
     if (activeTab === tab) return;
-    if (activeTab) {
+    if (activeTab && activeTab.type !== "pdf") {
       activeTab.scroll = cm.getScrollInfo();
       activeTab.cursor = cm.getCursor();
     }
     activeTab = tab;
-    cm.swapDoc(tab.doc);
-    cm.setOption("mode", tab.lang.mime);
-    if (tab.cursor) { cm.setCursor(tab.cursor); tab.cursor = null; }
-    if (tab.scroll) { cm.scrollTo(tab.scroll.left, tab.scroll.top); tab.scroll = null; }
+    if (tab.type === "pdf") {
+      document.getElementById("editor-container").classList.add("hidden");
+      document.getElementById("pdf-container").classList.remove("hidden");
+      showPdfTab(tab);
+    } else {
+      document.getElementById("pdf-container").classList.add("hidden");
+      document.getElementById("editor-container").classList.remove("hidden");
+      cm.swapDoc(tab.doc);
+      cm.setOption("mode", tab.lang.mime);
+      cm.refresh();
+      if (tab.cursor) { cm.setCursor(tab.cursor); tab.cursor = null; }
+      if (tab.scroll) { cm.scrollTo(tab.scroll.left, tab.scroll.top); tab.scroll = null; }
+    }
     renderTabs();
     updateStatus();
     updateTitle();
     scheduleOverlayUpdate();
-    cm.focus();
+    if (tab.type !== "pdf") cm.focus();
     scheduleSessionSave();
   }
 
@@ -211,6 +231,9 @@
     const idx = tabs.indexOf(tab);
     if (idx === -1) return;
     tabs.splice(idx, 1);
+    if (tab.type === "pdf" && tab.doc) {
+      try { tab.doc.destroy(); } catch (e) { /* already gone */ }
+    }
     if (tabs.length === 0) {
       activeTab = null;
       newTab();
@@ -243,6 +266,7 @@
 
       el.append(dot, name, close);
       el.addEventListener("mousedown", (e) => {
+        if (e.target.closest(".close")) return;  // let the ✕ click land; activating re-renders the bar
         if (e.button === 1) { e.preventDefault(); closeTab(tab); }
         else if (e.button === 0) activateTab(tab);
       });
@@ -276,8 +300,12 @@
     const picks = await backend.openDialog();
     for (const pick of picks || []) {
       if (pick && pick.shimName !== undefined) {   // browser demo mode
-        newTab({ name: pick.shimName, content: pick.shimContent,
-                 lang: langForPath(pick.shimName), eol: detectEol(pick.shimContent) });
+        if (pick.shimPdfBytes) {
+          await openPdfBytes(pick.shimPdfBytes, null, pick.shimName);
+        } else {
+          newTab({ name: pick.shimName, content: pick.shimContent,
+                   lang: langForPath(pick.shimName), eol: detectEol(pick.shimContent) });
+        }
         continue;
       }
       await openPath(pick);
@@ -287,6 +315,12 @@
   async function openPath(path) {
     const existing = tabs.find((t) => t.path === path);
     if (existing) { activateTab(existing); return; }
+    if (/\.pdf$/i.test(path)) {
+      const res = await backend.readFileB64(path);
+      if (res.error) { showAlert("Open failed", res.error); return; }
+      await openPdfBytes(base64ToBytes(res.data), path, path.split("/").pop());
+      return;
+    }
     const res = await backend.readFile(path);
     if (res.error) { showAlert("Open failed", res.error); return; }
     const tab = newTab({
@@ -295,12 +329,21 @@
       encoding: res.encoding,
       eol: detectEol(res.content),
     });
-    // Replace a single pristine untitled tab, like Notepad++ does
-    const lone = tabs.find((t) => t !== tab && !t.path && !isDirty(t) && t.doc.getValue() === "");
+    closeLoneUntitled(tab);
+  }
+
+  // Replace a single pristine untitled tab, like Notepad++ does
+  function closeLoneUntitled(justOpened) {
+    const lone = tabs.find((t) => t !== justOpened && t.type !== "pdf" &&
+                                  !t.path && !isDirty(t) && t.doc.getValue() === "");
     if (lone && tabs.length === 2) closeTab(lone);
   }
 
   async function saveTab(tab, saveAs = false) {
+    if (tab.type === "pdf") {
+      showAlert("Read-only", "PDF tabs are view-only. Use File → Open PDF as Text to get an editable copy of the text.");
+      return false;
+    }
     let path = tab.path;
     if (!path || saveAs) {
       path = await backend.saveDialog(tab.name.includes(".") ? tab.name : tab.name + ".txt",
@@ -325,8 +368,284 @@
 
   async function saveAll() {
     for (const tab of [...tabs]) {
+      if (tab.type === "pdf") continue;
       if (isDirty(tab) || !tab.path) await saveTab(tab);
     }
+  }
+
+  // ======================================================================
+  // PDF viewer (PDF.js) — read-only tabs with lazy page rendering
+  // ======================================================================
+  const pdfScroll = document.getElementById("pdf-scroll");
+  const pdfPagesEl = document.getElementById("pdf-pages");
+  let pdfObserver = null;
+
+  function base64ToBytes(b64) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+
+  async function openPdfBytes(bytes, path, name, opts = {}) {
+    if (typeof pdfjsLib === "undefined") {
+      showAlert("PDF", "PDF.js failed to load.");
+      return null;
+    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdfjs/pdf.worker.min.js";
+    let doc;
+    try {
+      doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    } catch (e) {
+      showAlert("PDF open failed", e.message || String(e));
+      return null;
+    }
+    const tab = {
+      id: nextId++,
+      type: "pdf",
+      path,
+      name,
+      doc,
+      numPages: doc.numPages,
+      page: opts.page || 1,
+      zoom: opts.zoom || null,       // null = fit width on first show
+      pageTexts: null,               // [{text, offsets, items}] built on demand
+      pageDivs: [],                  // per-page text-layer spans once rendered
+      matches: null,
+      matchIdx: -1,
+      lang: { id: "pdf", name: "PDF Document", mime: null },
+      encoding: "PDF",
+      eol: "\n",
+    };
+    tabs.push(tab);
+    renderTabs();
+    if (opts.activate !== false) {
+      activateTab(tab);
+      closeLoneUntitled(tab);
+    }
+    return tab;
+  }
+
+  async function showPdfTab(tab) {
+    pdfPagesEl.textContent = "";
+    if (pdfObserver) pdfObserver.disconnect();
+    tab.pageDivs = [];
+    const first = await tab.doc.getPage(1);
+    if (activeTab !== tab) return;   // user switched away mid-load
+    const base = first.getViewport({ scale: 1 });
+    if (!tab.zoom) tab.zoom = Math.max(0.25, (pdfScroll.clientWidth - 40) / base.width);
+    for (let i = 1; i <= tab.numPages; i++) {
+      const ph = document.createElement("div");
+      ph.className = "pdf-page";
+      ph.dataset.page = i;
+      ph.style.width = Math.floor(base.width * tab.zoom) + "px";
+      ph.style.height = Math.floor(base.height * tab.zoom) + "px";
+      pdfPagesEl.appendChild(ph);
+    }
+    pdfObserver = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (en.isIntersecting) renderPdfPage(tab, +en.target.dataset.page);
+      }
+    }, { root: pdfScroll, rootMargin: "400px" });
+    pdfPagesEl.querySelectorAll(".pdf-page").forEach((el) => pdfObserver.observe(el));
+    updatePdfToolbar(tab);
+    if (tab.page > 1) gotoPdfPage(tab, tab.page);
+  }
+
+  async function renderPdfPage(tab, n) {
+    const ph = pdfPagesEl.querySelector('.pdf-page[data-page="' + n + '"]');
+    if (!ph || ph.dataset.rendered || activeTab !== tab) return;
+    ph.dataset.rendered = "1";
+    const page = await tab.doc.getPage(n);
+    if (activeTab !== tab) { delete ph.dataset.rendered; return; }
+    const vp = page.getViewport({ scale: tab.zoom });
+    const dpr = window.devicePixelRatio || 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(vp.width * dpr);
+    canvas.height = Math.floor(vp.height * dpr);
+    canvas.style.width = Math.floor(vp.width) + "px";
+    canvas.style.height = Math.floor(vp.height) + "px";
+    ph.style.width = Math.floor(vp.width) + "px";
+    ph.style.height = Math.floor(vp.height) + "px";
+    ph.appendChild(canvas);
+    await page.render({
+      canvasContext: canvas.getContext("2d"),
+      viewport: vp,
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    }).promise;
+    // Text layer: enables selection, copy, and search highlighting
+    const tl = document.createElement("div");
+    tl.className = "textLayer";
+    tl.style.setProperty("--scale-factor", vp.scale);
+    ph.appendChild(tl);
+    const tc = await page.getTextContent();
+    const divs = [];
+    await pdfjsLib.renderTextLayer({
+      textContentSource: tc, container: tl, viewport: vp, textDivs: divs,
+    }).promise;
+    tab.pageDivs[n] = divs;
+    applyPdfHighlights(tab, n);
+  }
+
+  function updatePdfToolbar(tab) {
+    document.getElementById("pdf-page-input").value = tab.page;
+    document.getElementById("pdf-page-count").textContent = tab.numPages;
+    document.getElementById("pdf-zoom-label").textContent = Math.round((tab.zoom || 1) * 100) + "%";
+  }
+
+  function gotoPdfPage(tab, n) {
+    n = Math.min(Math.max(n, 1), tab.numPages);
+    tab.page = n;
+    const ph = pdfPagesEl.querySelector('.pdf-page[data-page="' + n + '"]');
+    if (ph) pdfScroll.scrollTop = ph.offsetTop - 14;
+    updatePdfToolbar(tab);
+    updateStatus();
+    scheduleSessionSave();
+  }
+
+  function setPdfZoom(tab, zoom) {
+    tab.zoom = zoom ? Math.min(Math.max(zoom, 0.25), 5) : null;
+    const page = tab.page;
+    showPdfTab(tab).then(() => { gotoPdfPage(tab, page); });
+  }
+
+  function pdfTrackScroll() {
+    if (!activeTab || activeTab.type !== "pdf") return;
+    const tab = activeTab;
+    const y = pdfScroll.scrollTop + pdfScroll.clientHeight / 2;
+    let current = 1;
+    for (const ph of pdfPagesEl.children) {
+      if (ph.offsetTop <= y) current = +ph.dataset.page;
+      else break;
+    }
+    if (current !== tab.page) {
+      tab.page = current;
+      updatePdfToolbar(tab);
+      updateStatus();
+      scheduleSessionSave();
+    }
+  }
+
+  // ---- PDF text: extraction & search ----
+  async function ensurePdfTexts(tab) {
+    if (tab.pageTexts) return tab.pageTexts;
+    const texts = [];
+    for (let i = 1; i <= tab.numPages; i++) {
+      const tc = await tab.doc.getPage(i).then((p) => p.getTextContent());
+      let s = "";
+      const offsets = [];
+      for (const item of tc.items) {
+        offsets.push(s.length);
+        s += item.str + (item.hasEOL ? "\n" : "");
+      }
+      texts.push({ text: s, offsets, items: tc.items });
+    }
+    tab.pageTexts = texts;
+    return texts;
+  }
+
+  async function pdfToText() {
+    const tab = activeTab;
+    if (!tab || tab.type !== "pdf") {
+      showAlert("Open PDF as Text", "Open a PDF first, then use this to extract its text into an editable tab.");
+      return;
+    }
+    const texts = await ensurePdfTexts(tab);
+    const content = texts.map((p) => p.text.trimEnd()).join("\n\n");
+    newTab({
+      name: tab.name.replace(/\.pdf$/i, "") + ".txt",
+      content,
+      lang: langById("text"),
+    });
+  }
+
+  async function pdfUpdateSearch() {
+    const tab = activeTab;
+    if (!tab || tab.type !== "pdf") return;
+    pdfClearHighlights(tab);
+    tab.matches = null;
+    tab.matchIdx = -1;
+    if (findbar.classList.contains("hidden")) return;
+    const rx = queryAsRegex();
+    if (!rx) return;
+    const texts = await ensurePdfTexts(tab);
+    if (activeTab !== tab) return;
+    const matches = [];
+    texts.forEach((pt, idx) => {
+      rx.lastIndex = 0;
+      let m;
+      while ((m = rx.exec(pt.text)) && matches.length < 10000) {
+        matches.push({ page: idx + 1, start: m.index, end: m.index + (m[0].length || 1) });
+        if (m[0].length === 0) rx.lastIndex++;
+      }
+    });
+    tab.matches = matches;
+    findCount.textContent = matches.length === 0 ? "no matches"
+      : matches.length + (matches.length === 1 ? " match" : " matches");
+    findInput.classList.toggle("notfound", matches.length === 0);
+    for (let n = 1; n <= tab.numPages; n++) applyPdfHighlights(tab, n);
+  }
+
+  function pdfClearHighlights(tab) {
+    (tab.pageDivs || []).forEach((divs) => {
+      if (divs) divs.forEach((d) => d.classList.remove("match-hl", "match-cur"));
+    });
+  }
+
+  function applyPdfHighlights(tab, n) {
+    const divs = tab.pageDivs[n];
+    const pt = tab.pageTexts && tab.pageTexts[n - 1];
+    if (!divs || !pt || !tab.matches) return;
+    divs.forEach((d) => d.classList.remove("match-hl", "match-cur"));
+    tab.matches.forEach((m, k) => {
+      if (m.page !== n) return;
+      for (let i = 0; i < pt.items.length; i++) {
+        const s = pt.offsets[i];
+        const e = s + pt.items[i].str.length;
+        if (e > m.start && s < m.end && divs[i]) {
+          divs[i].classList.add("match-hl");
+          if (k === tab.matchIdx) divs[i].classList.add("match-cur");
+        }
+      }
+    });
+  }
+
+  async function pdfFindStep(backwards) {
+    const tab = activeTab;
+    if (!tab || tab.type !== "pdf") return;
+    if (!tab.matches) await pdfUpdateSearch();
+    if (!tab.matches || tab.matches.length === 0) return;
+    const len = tab.matches.length;
+    tab.matchIdx = tab.matchIdx === -1
+      ? (backwards ? len - 1 : 0)
+      : (tab.matchIdx + (backwards ? -1 : 1) + len) % len;
+    const m = tab.matches[tab.matchIdx];
+    for (let n = 1; n <= tab.numPages; n++) applyPdfHighlights(tab, n);
+    findCount.textContent = (tab.matchIdx + 1) + " of " + len;
+    const cur = pdfPagesEl.querySelector(".match-cur");
+    if (cur) cur.scrollIntoView({ block: "center" });
+    else gotoPdfPage(tab, m.page);   // page not rendered yet; highlight lands after render
+    tab.page = m.page;
+    updatePdfToolbar(tab);
+    updateStatus();
+  }
+
+  function setupPdfToolbar() {
+    const tab = () => (activeTab && activeTab.type === "pdf" ? activeTab : null);
+    document.getElementById("pdf-prev").addEventListener("click", () => { const t = tab(); if (t) gotoPdfPage(t, t.page - 1); });
+    document.getElementById("pdf-next").addEventListener("click", () => { const t = tab(); if (t) gotoPdfPage(t, t.page + 1); });
+    document.getElementById("pdf-zoom-in").addEventListener("click", () => { const t = tab(); if (t) setPdfZoom(t, t.zoom * 1.2); });
+    document.getElementById("pdf-zoom-out").addEventListener("click", () => { const t = tab(); if (t) setPdfZoom(t, t.zoom / 1.2); });
+    document.getElementById("pdf-zoom-fit").addEventListener("click", () => { const t = tab(); if (t) setPdfZoom(t, null); });
+    document.getElementById("pdf-extract").addEventListener("click", pdfToText);
+    document.getElementById("pdf-page-input").addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const t = tab();
+      const n = parseInt(e.target.value, 10);
+      if (t && !isNaN(n)) gotoPdfPage(t, n);
+    });
+    pdfScroll.addEventListener("scroll", pdfTrackScroll);
   }
 
   // ======================================================================
@@ -349,6 +668,9 @@
       activeIndex: tabs.indexOf(activeTab),
       settings,
       tabs: tabs.map((t) => {
+        if (t.type === "pdf") {
+          return { type: "pdf", path: t.path, name: t.name, page: t.page, zoom: t.zoom };
+        }
         const dirty = isDirty(t);
         const cur = t === activeTab ? t.liveCursor : t.cursor;
         const scr = t === activeTab ? t.liveScroll : t.scroll;
@@ -381,6 +703,14 @@
     untitledCounter = s.untitledCounter || 0;
     Object.assign(settings, s.settings || {});
     for (const st of s.tabs) {
+      if (st.type === "pdf") {
+        if (!st.path) continue;                    // browser-demo PDFs can't be reopened
+        const res = await backend.readFileB64(st.path);
+        if (res.error) continue;                   // file vanished since last session
+        await openPdfBytes(base64ToBytes(res.data), st.path, st.name,
+                           { page: st.page, zoom: st.zoom, activate: false });
+        continue;
+      }
       let content = st.content;
       if (content == null && st.path) {
         const res = await backend.readFile(st.path);
@@ -444,6 +774,7 @@
     if (searchOverlay) { cm.removeOverlay(searchOverlay); searchOverlay = null; }
     findCount.textContent = "";
     findInput.classList.remove("notfound");
+    if (activeTab && activeTab.type === "pdf") { pdfUpdateSearch(); return; }
     if (findbar.classList.contains("hidden")) return;
     const rx = queryAsRegex();
     if (!rx) return;
@@ -471,6 +802,7 @@
   }
 
   function findStep(backwards) {
+    if (activeTab && activeTab.type === "pdf") { pdfFindStep(backwards); return; }
     const q = currentQuery();
     if (!q) return;
     const start = backwards ? cm.getCursor("from") : cm.getCursor("to");
@@ -493,6 +825,7 @@
   }
 
   function replaceOne() {
+    if (activeTab && activeTab.type === "pdf") { findCount.textContent = "PDF is read-only"; return; }
     const q = currentQuery();
     if (!q) return;
     const sel = cm.getSelection();
@@ -507,6 +840,7 @@
   }
 
   function replaceAll() {
+    if (activeTab && activeTab.type === "pdf") { findCount.textContent = "PDF is read-only"; return; }
     const q = currentQuery();
     if (!q) return;
     let n = 0;
@@ -530,9 +864,12 @@
 
   function showFindbar(withReplace) {
     findbar.classList.remove("hidden");
-    $("#replacerow").classList.toggle("hidden", !withReplace);
-    const sel = cm.getSelection();
-    if (sel && !sel.includes("\n")) findInput.value = sel;
+    const isPdf = activeTab && activeTab.type === "pdf";
+    $("#replacerow").classList.toggle("hidden", !withReplace || isPdf);
+    if (!isPdf) {
+      const sel = cm.getSelection();
+      if (sel && !sel.includes("\n")) findInput.value = sel;
+    }
     findInput.focus();
     findInput.select();
     updateOverlay();
@@ -541,7 +878,8 @@
   function hideFindbar() {
     findbar.classList.add("hidden");
     updateOverlay();
-    cm.focus();
+    if (activeTab && activeTab.type === "pdf") pdfClearHighlights(activeTab);
+    else cm.focus();
   }
 
   // ======================================================================
@@ -549,6 +887,14 @@
   // ======================================================================
   function updateStatus() {
     if (!activeTab) return;
+    if (activeTab.type === "pdf") {
+      $("#st-lang").textContent = "PDF Document (read-only)";
+      $("#st-length").textContent = `pages : ${activeTab.numPages}`;
+      $("#st-pos").textContent = `Page : ${activeTab.page} / ${activeTab.numPages}`;
+      $("#st-eol").textContent = "—";
+      $("#st-enc").textContent = "PDF";
+      return;
+    }
     const doc = cm.getDoc();
     const pos = cm.getCursor();
     const selChars = cm.getSelections().reduce((a, s) => a + s.length, 0);
@@ -578,7 +924,7 @@
   }
 
   function setLanguage(lang) {
-    if (!activeTab) return;
+    if (!activeTab || activeTab.type === "pdf") return;
     activeTab.lang = lang;
     cm.setOption("mode", lang.mime);
     updateStatus();
@@ -649,7 +995,10 @@
     const inp = $("#modal-body input");
     if (inp) { inp.focus(); inp.select(); }
   }
-  function hideModal() { backdrop.classList.add("hidden"); cm.focus(); }
+  function hideModal() {
+    backdrop.classList.add("hidden");
+    if (!activeTab || activeTab.type !== "pdf") cm.focus();
+  }
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) hideModal(); });
 
   function showAlert(title, msg) {
@@ -657,6 +1006,20 @@
   }
   function escapeHtml(s) {
     return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function gotoPageDialog() {
+    const tab = activeTab;
+    if (!tab || tab.type !== "pdf") return;
+    showModal("Go to Page", '<label>Page number (1 - ' + tab.numPages + ') :</label><input id="goto-input" type="text">',
+      [{ label: "Go", onClick: doGoto }, { label: "Cancel" }]);
+    $("#goto-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); hideModal(); doGoto(); }
+    });
+    function doGoto() {
+      const n = parseInt($("#goto-input") ? $("#goto-input").value : "", 10);
+      if (!isNaN(n)) gotoPdfPage(tab, n);
+    }
   }
 
   function gotoLineDialog() {
@@ -704,6 +1067,20 @@
   }
 
   function runCommand(cmd) {
+    const isPdf = activeTab && activeTab.type === "pdf";
+    if (isPdf) {
+      // Editor-only commands are no-ops on a read-only PDF tab
+      if (["undo", "redo", "cut", "paste", "selectAll", "toggleWrap", "toggleLineNumbers"].includes(cmd)) return;
+      if (cmd === "copy") {
+        const sel = String(window.getSelection());
+        if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+        return;
+      }
+      if (cmd === "zoomIn") { setPdfZoom(activeTab, activeTab.zoom * 1.2); return; }
+      if (cmd === "zoomOut") { setPdfZoom(activeTab, activeTab.zoom / 1.2); return; }
+      if (cmd === "zoomReset") { setPdfZoom(activeTab, null); return; }
+      if (cmd === "gotoLine") { gotoPageDialog(); return; }
+    }
     const actions = {
       new: () => newTab(),
       open: openFiles,
@@ -738,11 +1115,12 @@
       zoomIn: () => { settings.fontSize = Math.min(settings.fontSize + 1, 36); applyFontSize(); scheduleSessionSave(); },
       zoomOut: () => { settings.fontSize = Math.max(settings.fontSize - 1, 8); applyFontSize(); scheduleSessionSave(); },
       zoomReset: () => { settings.fontSize = 13; applyFontSize(); scheduleSessionSave(); },
+      pdfToText,
       about: aboutDialog,
     };
     const fn = actions[cmd];
     if (fn) fn();
-    if (!["find", "replace", "gotoLine", "about"].includes(cmd)) cm.focus();
+    if (!isPdf && !["find", "replace", "gotoLine", "about"].includes(cmd)) cm.focus();
   }
 
   function setupShortcuts() {
@@ -789,6 +1167,7 @@
     buildLanguageMenu();
     setupMenubar();
     setupShortcuts();
+    setupPdfToolbar();
     await backend.init();
     await restoreSession();
     cm.setOption("lineWrapping", settings.wrap);

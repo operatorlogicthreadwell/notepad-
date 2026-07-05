@@ -14,6 +14,7 @@
     <div class="dropdown">
       <div class="mi" data-cmd="new">New<span class="key">&#8984;N</span></div>
       <div class="mi" data-cmd="open">Open&hellip;<span class="key">&#8984;O</span></div>
+      <div class="mi" data-cmd="pdfToText">Open PDF as Text</div>
       <div class="sep"></div>
       <div class="mi" data-cmd="save">Save<span class="key">&#8984;S</span></div>
       <div class="mi" data-cmd="saveAs">Save As&hellip;<span class="key">&#8679;&#8984;S</span></div>
@@ -92,6 +93,24 @@
 <!-- ===== Editor ===== -->
 <div id="editor-container"></div>
 
+<!-- ===== PDF viewer ===== -->
+<div id="pdf-container" class="hidden">
+  <div id="pdf-toolbar">
+    <button id="pdf-prev" title="Previous page">&#9650;</button>
+    <input id="pdf-page-input" type="text"> / <span id="pdf-page-count">1</span>
+    <button id="pdf-next" title="Next page">&#9660;</button>
+    <span class="pdfsep"></span>
+    <button id="pdf-zoom-out" title="Zoom out (&#8984;&minus;)">&minus;</button>
+    <span id="pdf-zoom-label">100%</span>
+    <button id="pdf-zoom-in" title="Zoom in (&#8984;+)">+</button>
+    <button id="pdf-zoom-fit" title="Fit width (&#8984;0)">Fit</button>
+    <span class="pdfsep"></span>
+    <button id="pdf-extract" title="Extract all text into an editable tab">Open as Text</button>
+    <span id="pdf-readonly">read-only</span>
+  </div>
+  <div id="pdf-scroll"><div id="pdf-pages"></div></div>
+</div>
+
 <!-- ===== Find / Replace bar ===== -->
 <div id="findbar" class="hidden">
   <div class="findrow">
@@ -145,6 +164,7 @@
 <script src="vendor/codemirror/mode/clike.min.js"></script>
 <script src="vendor/codemirror/mode/yaml.min.js"></script>
 <script src="vendor/codemirror/mode/sql.min.js"></script>
+<script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
