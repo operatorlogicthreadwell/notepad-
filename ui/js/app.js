@@ -74,8 +74,9 @@
       return name; // browser demo: pretend, then download
     },
 
-    async writeFile(path, content) {
-      if (!this.isShim) return this.api.write_file(path, content);
+    async writeFile(path, content, encoding, expectedMtime) {
+      if (!this.isShim) return this.api.write_file(path, content, encoding || "UTF-8",
+                                                   expectedMtime == null ? null : expectedMtime);
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
       a.download = path.split("/").pop();
@@ -184,6 +185,7 @@
       lang,
       encoding: opts.encoding || "UTF-8",
       eol: opts.eol || "\n",
+      mtime: opts.mtime != null ? opts.mtime : null,
       scroll: opts.scroll || null,
       cursor: opts.cursor || null,
     };
@@ -227,9 +229,19 @@
     scheduleSessionSave();
   }
 
-  function closeTab(tab) {
+  async function closeTab(tab, force = false) {
+    if (!force && isDirty(tab) && !(!tab.path && tab.doc.getValue() === "")) {
+      const choice = await showConfirm("Save file?",
+        'Save changes to "' + tab.name + '" before closing?',
+        [{ label: "Save", value: "save" },
+         { label: "Don't Save", value: "discard" },
+         { label: "Cancel", value: "cancel" }],
+        "cancel");
+      if (choice === "cancel") return false;
+      if (choice === "save" && !(await saveTab(tab))) return false;
+    }
     const idx = tabs.indexOf(tab);
-    if (idx === -1) return;
+    if (idx === -1) return false;
     tabs.splice(idx, 1);
     if (tab.type === "pdf" && tab.doc) {
       try { tab.doc.destroy(); } catch (e) { /* already gone */ }
@@ -244,6 +256,7 @@
       renderTabs();
     }
     scheduleSessionSave();
+    return true;
   }
 
   function renderTabs() {
@@ -328,6 +341,7 @@
       content: res.content.replace(/\r\n/g, "\n"),
       encoding: res.encoding,
       eol: detectEol(res.content),
+      mtime: res.mtime,
     });
     closeLoneUntitled(tab);
   }
@@ -336,7 +350,7 @@
   function closeLoneUntitled(justOpened) {
     const lone = tabs.find((t) => t !== justOpened && t.type !== "pdf" &&
                                   !t.path && !isDirty(t) && t.doc.getValue() === "");
-    if (lone && tabs.length === 2) closeTab(lone);
+    if (lone && tabs.length === 2) closeTab(lone, true);
   }
 
   async function saveTab(tab, saveAs = false) {
@@ -351,8 +365,20 @@
       if (!path) return false;
     }
     const content = tab.doc.getValue(tab.eol);
-    const res = await backend.writeFile(path, content);
+    // Only guard against disk conflicts when overwriting the file we read
+    const guardMtime = !saveAs && path === tab.path ? tab.mtime : null;
+    let res = await backend.writeFile(path, content, tab.encoding, guardMtime);
+    if (res.conflict) {
+      const choice = await showConfirm("File changed on disk",
+        '"' + tab.name + '" was modified by another program after you opened it. Overwrite it with your version?',
+        [{ label: "Overwrite", value: "overwrite" }, { label: "Cancel", value: "cancel" }],
+        "cancel");
+      if (choice !== "overwrite") return false;
+      res = await backend.writeFile(path, content, tab.encoding, null);
+    }
     if (res.error) { showAlert("Save failed", res.error); return false; }
+    if (res.encoding) tab.encoding = res.encoding;
+    if (res.mtime != null) tab.mtime = res.mtime;
     tab.path = path;
     tab.name = path.split("/").pop();
     tab.lang = langForPath(path);
@@ -395,7 +421,9 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdfjs/pdf.worker.min.js";
     let doc;
     try {
-      doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+      // isEvalSupported:false blocks CVE-2024-4367-style JS execution from
+      // malicious PDFs — critical here since the page holds a file-I/O bridge
+      doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
     } catch (e) {
       showAlert("PDF open failed", e.message || String(e));
       return null;
@@ -433,7 +461,10 @@
     const first = await tab.doc.getPage(1);
     if (activeTab !== tab) return;   // user switched away mid-load
     const base = first.getViewport({ scale: 1 });
-    if (!tab.zoom) tab.zoom = Math.max(0.25, (pdfScroll.clientWidth - 40) / base.width);
+    if (!tab.zoom) {
+      tab.zoom = Math.max(0.25, (pdfScroll.clientWidth - 40) / base.width);
+      tab.fitWidth = true;
+    }
     for (let i = 1; i <= tab.numPages; i++) {
       const ph = document.createElement("div");
       ph.className = "pdf-page";
@@ -497,7 +528,12 @@
     n = Math.min(Math.max(n, 1), tab.numPages);
     tab.page = n;
     const ph = pdfPagesEl.querySelector('.pdf-page[data-page="' + n + '"]');
-    if (ph) pdfScroll.scrollTop = ph.offsetTop - 14;
+    if (ph) {
+      // offsetTop is body-relative here (no positioned ancestor), so measure
+      // the real distance between the page and the scroller instead
+      const delta = ph.getBoundingClientRect().top - pdfScroll.getBoundingClientRect().top;
+      pdfScroll.scrollTop += delta - 14;
+    }
     updatePdfToolbar(tab);
     updateStatus();
     scheduleSessionSave();
@@ -505,6 +541,7 @@
 
   function setPdfZoom(tab, zoom) {
     tab.zoom = zoom ? Math.min(Math.max(zoom, 0.25), 5) : null;
+    tab.fitWidth = !zoom;
     const page = tab.page;
     showPdfTab(tab).then(() => { gotoPdfPage(tab, page); });
   }
@@ -556,6 +593,7 @@
       name: tab.name.replace(/\.pdf$/i, "") + ".txt",
       content,
       lang: langById("text"),
+      dirty: true,   // exists only in memory — show the red dot until saved
     });
   }
 
@@ -646,6 +684,14 @@
       if (t && !isNaN(n)) gotoPdfPage(t, n);
     });
     pdfScroll.addEventListener("scroll", pdfTrackScroll);
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const t = tab();
+        if (t && t.fitWidth) setPdfZoom(t, null);   // re-fit width after resize
+      }, 250);
+    });
   }
 
   // ======================================================================
@@ -669,7 +715,8 @@
       settings,
       tabs: tabs.map((t) => {
         if (t.type === "pdf") {
-          return { type: "pdf", path: t.path, name: t.name, page: t.page, zoom: t.zoom };
+          return { type: "pdf", path: t.path, name: t.name, page: t.page,
+                   zoom: t.zoom, fit: !!t.fitWidth };
         }
         const dirty = isDirty(t);
         const cur = t === activeTab ? t.liveCursor : t.cursor;
@@ -702,36 +749,43 @@
     if (!s || !Array.isArray(s.tabs) || s.tabs.length === 0) { newTab(); return; }
     untitledCounter = s.untitledCounter || 0;
     Object.assign(settings, s.settings || {});
-    for (const st of s.tabs) {
+    let toActivate = null;
+    for (let i = 0; i < s.tabs.length; i++) {
+      const st = s.tabs[i];
+      let tab = null;
       if (st.type === "pdf") {
         if (!st.path) continue;                    // browser-demo PDFs can't be reopened
         const res = await backend.readFileB64(st.path);
         if (res.error) continue;                   // file vanished since last session
-        await openPdfBytes(base64ToBytes(res.data), st.path, st.name,
-                           { page: st.page, zoom: st.zoom, activate: false });
-        continue;
+        tab = await openPdfBytes(base64ToBytes(res.data), st.path, st.name,
+                                 { page: st.page, zoom: st.fit ? null : st.zoom, activate: false });
+      } else {
+        let content = st.content;
+        let mtime = null;
+        if (content == null && st.path) {
+          const res = await backend.readFile(st.path);
+          if (res.error) continue;             // file vanished since last session
+          content = res.content.replace(/\r\n/g, "\n");
+          mtime = res.mtime;
+        }
+        tab = newTab({
+          path: st.path,
+          name: st.name,
+          content: content || "",
+          lang: langById(st.lang),
+          encoding: st.encoding,
+          eol: st.eol || "\n",
+          mtime,
+          dirty: !!st.dirty,
+          cursor: st.cursor,
+          scroll: st.scroll,
+          activate: false,
+        });
       }
-      let content = st.content;
-      if (content == null && st.path) {
-        const res = await backend.readFile(st.path);
-        if (res.error) continue;             // file vanished since last session
-        content = res.content.replace(/\r\n/g, "\n");
-      }
-      newTab({
-        path: st.path,
-        name: st.name,
-        content: content || "",
-        lang: langById(st.lang),
-        encoding: st.encoding,
-        eol: st.eol || "\n",
-        dirty: !!st.dirty,
-        cursor: st.cursor,
-        scroll: st.scroll,
-        activate: false,
-      });
+      if (i === (s.activeIndex || 0) && tab) toActivate = tab;
     }
     if (tabs.length === 0) { newTab(); return; }
-    activateTab(tabs[Math.min(Math.max(s.activeIndex || 0, 0), tabs.length - 1)]);
+    activateTab(toActivate || tabs[tabs.length - 1]);
   }
 
   // ======================================================================
@@ -885,6 +939,16 @@
   // ======================================================================
   // Status bar
   // ======================================================================
+  // Cache the document length — getValue() joins the whole file, far too
+  // costly to redo on every keystroke or cursor move in large files
+  let lenCache = { doc: null, gen: -1, len: 0 };
+  function docLength(doc) {
+    const gen = doc.changeGeneration();
+    if (lenCache.doc === doc && lenCache.gen === gen) return lenCache.len;
+    lenCache = { doc, gen, len: doc.getValue().length };
+    return lenCache.len;
+  }
+
   function updateStatus() {
     if (!activeTab) return;
     if (activeTab.type === "pdf") {
@@ -901,8 +965,10 @@
     const selLines = cm.somethingSelected()
       ? cm.listSelections().reduce((a, r) => a + Math.abs(r.head.line - r.anchor.line) + (r.head.ch !== r.anchor.ch || r.head.line !== r.anchor.line ? 1 : 0), 0)
       : 0;
+    // like Notepad++, count line endings at their on-disk width (CRLF = 2)
+    const eolExtra = activeTab.eol === "\r\n" ? doc.lineCount() - 1 : 0;
     $("#st-lang").textContent = activeTab.lang.name;
-    $("#st-length").textContent = `length : ${doc.getValue().length}    lines : ${doc.lineCount()}`;
+    $("#st-length").textContent = `length : ${docLength(doc) + eolExtra}    lines : ${doc.lineCount()}`;
     $("#st-pos").textContent = `Ln : ${pos.line + 1}    Col : ${pos.ch + 1}    Sel : ${selChars} | ${selLines}`;
     $("#st-eol").textContent = activeTab.eol === "\r\n" ? "Windows (CR LF)" : "Unix (LF)";
     $("#st-enc").textContent = activeTab.encoding;
@@ -980,6 +1046,7 @@
   // Modal dialogs
   // ======================================================================
   const backdrop = $("#modal-backdrop");
+  let modalOnDismiss = null;   // fires when the modal closes without a button press
   function showModal(title, bodyHTML, buttons) {
     $("#modal-title").textContent = title;
     $("#modal-body").innerHTML = bodyHTML;
@@ -988,7 +1055,7 @@
     for (const b of buttons) {
       const btn = document.createElement("button");
       btn.textContent = b.label;
-      btn.addEventListener("click", () => { hideModal(); b.onClick && b.onClick(); });
+      btn.addEventListener("click", () => { modalOnDismiss = null; hideModal(); b.onClick && b.onClick(); });
       bb.appendChild(btn);
     }
     backdrop.classList.remove("hidden");
@@ -997,7 +1064,17 @@
   }
   function hideModal() {
     backdrop.classList.add("hidden");
+    if (modalOnDismiss) { const f = modalOnDismiss; modalOnDismiss = null; f(); }
     if (!activeTab || activeTab.type !== "pdf") cm.focus();
+  }
+
+  // Ask the user to pick a button; Esc / click-away resolves to dismissValue.
+  function showConfirm(title, msg, buttons, dismissValue) {
+    return new Promise((resolve) => {
+      modalOnDismiss = () => resolve(dismissValue);
+      showModal(title, "<div>" + escapeHtml(msg) + "</div>",
+        buttons.map((b) => ({ label: b.label, onClick: () => resolve(b.value) })));
+    });
   }
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) hideModal(); });
 
@@ -1088,7 +1165,11 @@
       saveAs: () => activeTab && saveTab(activeTab, true),
       saveAll,
       closeTab: () => activeTab && closeTab(activeTab),
-      closeAll: () => { for (const t of [...tabs]) closeTab(t); },
+      closeAll: async () => {
+        for (const t of [...tabs]) {
+          if (!(await closeTab(t))) break;   // Cancel stops the sweep
+        }
+      },
       undo: () => cm.undo(),
       redo: () => cm.redo(),
       cut: clipboardCut,

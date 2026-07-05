@@ -61,22 +61,47 @@ class Api:
         return str(result) if result else None
 
     # ---- file I/O ------------------------------------------------------
+    MAX_TEXT_BYTES = 64 * 1024 * 1024
+    MAX_PDF_BYTES = 256 * 1024 * 1024
+    CODECS = {"UTF-8": "utf-8", "UTF-8-BOM": "utf-8-sig", "ANSI": "latin-1"}
+
+    def _size_guard(self, path, limit):
+        try:
+            size = os.path.getsize(path)
+        except OSError as exc:
+            return str(exc)
+        if size > limit:
+            return "File is %d MB; Notepad-- opens files up to %d MB." % (
+                size // (1024 * 1024), limit // (1024 * 1024))
+        return None
+
     def read_file(self, path):
+        err = self._size_guard(path, self.MAX_TEXT_BYTES)
+        if err:
+            return {"error": err}
         try:
             with open(path, "rb") as f:
                 raw = f.read()
+            mtime = os.path.getmtime(path)
         except OSError as exc:
             return {"error": str(exc)}
-        try:
-            text = raw.decode("utf-8")
-            encoding = "UTF-8"
-        except UnicodeDecodeError:
-            text = raw.decode("latin-1")
-            encoding = "ANSI"
-        return {"content": text, "encoding": encoding}
+        if raw.startswith(b"\xef\xbb\xbf"):
+            text = raw.decode("utf-8-sig")
+            encoding = "UTF-8-BOM"
+        else:
+            try:
+                text = raw.decode("utf-8")
+                encoding = "UTF-8"
+            except UnicodeDecodeError:
+                text = raw.decode("latin-1")
+                encoding = "ANSI"
+        return {"content": text, "encoding": encoding, "mtime": mtime}
 
     def read_file_b64(self, path):
         """Binary read for non-text documents (PDFs), base64-encoded."""
+        err = self._size_guard(path, self.MAX_PDF_BYTES)
+        if err:
+            return {"error": err}
         try:
             with open(path, "rb") as f:
                 raw = f.read()
@@ -84,11 +109,25 @@ class Api:
             return {"error": str(exc)}
         return {"data": base64.b64encode(raw).decode("ascii")}
 
-    def write_file(self, path, content):
+    def write_file(self, path, content, encoding="UTF-8", expected_mtime=None):
+        # Refuse to clobber changes another program made since we read the file
+        if expected_mtime is not None:
+            try:
+                if abs(os.path.getmtime(path) - expected_mtime) > 1e-6:
+                    return {"conflict": True}
+            except OSError:
+                pass  # file was deleted/moved; plain save recreates it
+        codec = self.CODECS.get(encoding, "utf-8")
         try:
-            with open(path, "w", encoding="utf-8", newline="") as f:
-                f.write(content)
-            return {"ok": True}
+            data = content.encode(codec)
+        except UnicodeEncodeError:
+            # e.g. an emoji typed into an ANSI file — fall back rather than fail
+            data = content.encode("utf-8")
+            encoding = "UTF-8"
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+            return {"ok": True, "encoding": encoding, "mtime": os.path.getmtime(path)}
         except OSError as exc:
             return {"error": str(exc)}
 

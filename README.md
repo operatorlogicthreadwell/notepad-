@@ -25,6 +25,10 @@ the system WKWebView — so there's no bundled browser and the app stays small.
 - **The classics** — line numbers, word wrap toggle, go-to-line, zoom,
   current-line highlight, bracket matching, line/column/selection status bar,
   Windows/Unix line-ending detection (preserved on save)
+- **Your work is protected** — closing a tab with unsaved changes asks
+  Save / Don't Save / Cancel; saving warns if another program changed the
+  file on disk since you opened it; files keep their original encoding
+  (UTF-8, UTF-8-BOM, ANSI) instead of being silently re-encoded
 - **PDF viewing** — open a `.pdf` and it renders in a read-only tab
   ([PDF.js](https://mozilla.github.io/pdf.js/), vendored, works offline):
   page navigation, zoom/fit-width, ⌘L go-to-page, text selection, and ⌘F
@@ -62,6 +66,9 @@ installs `pyinstaller` automatically.)
 
 > Note: because unsaved text is always preserved in the session, closing the
 > window never loses work — just like Notepad++.
+>
+> Known caveat: macOS may bind ⌘W to "close window" at the native menu level
+> before the app sees it. If that happens, your tabs are restored on relaunch.
 
 ## Project layout
 
