@@ -8,8 +8,10 @@ Build .app:     ./build_app.sh
 """
 
 import base64
+import html as htmllib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -234,6 +236,102 @@ class Api:
 
         threading.Thread(target=wait, daemon=True).start()
         return {"ok": True}
+
+    # ---- Apple Notes (via macOS automation / osascript JXA) --------------
+    _NOTES_LIST_JXA = """
+var app = Application('Notes');
+var ids = app.notes.id();
+var names = app.notes.name();
+var mods = [];
+try { mods = app.notes.modificationDate(); } catch (e) {}
+var folders = [];
+try { folders = app.notes.container.name(); } catch (e) {}
+var out = [];
+for (var i = 0; i < ids.length; i++) {
+  out.push({ id: ids[i], name: names[i] || 'Untitled',
+             folder: folders[i] || '',
+             modified: mods[i] ? mods[i].toISOString() : '' });
+}
+out.sort(function (a, b) { return a.modified < b.modified ? 1 : -1; });
+JSON.stringify(out.slice(0, 500));
+"""
+
+    def _osascript(self, script, timeout=90):
+        if sys.platform != "darwin":
+            return {"error": "Apple Notes integration works on macOS only."}
+        try:
+            proc = subprocess.run(
+                ["osascript", "-l", "JavaScript", "-e", script],
+                capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"error": str(exc)}
+        if proc.returncode != 0:
+            err = proc.stderr.strip()
+            if "-1743" in err:
+                return {"error": "Notepad-- isn't allowed to control Notes.\n"
+                                 "Allow it under System Settings → Privacy & Security "
+                                 "→ Automation → Notepad-- → Notes, then try again."}
+            return {"error": err or "Could not talk to Apple Notes."}
+        try:
+            return {"data": json.loads(proc.stdout.strip())}
+        except ValueError:
+            return {"error": "Unexpected reply from Notes: " + proc.stdout[:200]}
+
+    @staticmethod
+    def _html_to_text(body):
+        """Apple Notes bodies are HTML; flatten to editable plain text."""
+        s = re.sub(r"<br[^>]*>", "\n", body, flags=re.I)
+        s = re.sub(r"<li[^>]*>", "- ", s, flags=re.I)
+        s = re.sub(r"</(?:li|div|h1|h2|h3|ul|ol)>\s*", "\n", s, flags=re.I)
+        s = re.sub(r"<[^>]+>", "", s)
+        s = htmllib.unescape(s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        return s.strip("\n")
+
+    @staticmethod
+    def _text_to_html(text):
+        lines = text.split("\n")
+        return "".join(
+            "<div>%s</div>" % (htmllib.escape(line) if line.strip() else "<br>")
+            for line in lines)
+
+    def notes_list(self):
+        result = self._osascript(self._NOTES_LIST_JXA)
+        if "error" in result:
+            return result
+        return {"notes": result["data"]}
+
+    def notes_get(self, note_id):
+        script = ("var p = %s;\n"
+                  "var app = Application('Notes');\n"
+                  "var n = app.notes.byId(p.id);\n"
+                  "JSON.stringify({ name: n.name(), body: n.body() });"
+                  % json.dumps({"id": note_id}))
+        result = self._osascript(script)
+        if "error" in result:
+            return result
+        data = result["data"]
+        return {"name": data.get("name") or "Untitled",
+                "content": self._html_to_text(data.get("body") or "")}
+
+    def notes_save(self, note_id, content):
+        payload = {"id": note_id, "body": self._text_to_html(content)}
+        script = ("var p = %s;\n"
+                  "var app = Application('Notes');\n"
+                  "var out;\n"
+                  "if (p.id) {\n"
+                  "  var n = app.notes.byId(p.id);\n"
+                  "  n.body = p.body;\n"
+                  "  out = { ok: true, id: p.id, name: n.name() };\n"
+                  "} else {\n"
+                  "  var n = app.make({ new: 'note', withProperties: { body: p.body } });\n"
+                  "  out = { ok: true, id: n.id(), name: n.name() };\n"
+                  "}\n"
+                  "JSON.stringify(out);" % json.dumps(payload))
+        result = self._osascript(script)
+        if "error" in result:
+            return result
+        return result["data"]
 
     # ---- window --------------------------------------------------------
     def set_title(self, title):

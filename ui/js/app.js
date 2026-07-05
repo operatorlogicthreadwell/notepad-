@@ -119,6 +119,29 @@
       try { return (await this.api.get_startup_files()) || []; }
       catch (e) { return []; }
     },
+
+    // Apple Notes — demo data in the browser, osascript on the Mac
+    _shimNotes: [
+      { id: "demo-1", name: "Groceries", folder: "Notes", content: "Groceries\nmilk\neggs\ncoffee" },
+      { id: "demo-2", name: "Ideas", folder: "Notes", content: "Ideas\nbuild a Notepad++ for Mac" },
+    ],
+    async notesList() {
+      if (!this.isShim) return this.api.notes_list();
+      return { notes: this._shimNotes.map((n) => ({ id: n.id, name: n.name, folder: n.folder, modified: "" })) };
+    },
+    async notesGet(id) {
+      if (!this.isShim) return this.api.notes_get(id);
+      const n = this._shimNotes.find((x) => x.id === id);
+      return n ? { name: n.name, content: n.content } : { error: "Note not found" };
+    },
+    async notesSave(id, content) {
+      if (!this.isShim) return this.api.notes_save(id, content);
+      const name = (content.split("\n").find((l) => l.trim()) || "Untitled").trim();
+      let n = this._shimNotes.find((x) => x.id === id);
+      if (!n) { n = { id: "demo-" + (this._shimNotes.length + 1), folder: "Notes" }; this._shimNotes.push(n); }
+      n.name = name; n.content = content;
+      return { ok: true, id: n.id, name };
+    },
   };
 
   // ======================================================================
@@ -204,6 +227,7 @@
       encoding: opts.encoding || "UTF-8",
       eol: opts.eol || "\n",
       mtime: opts.mtime != null ? opts.mtime : null,
+      noteId: opts.noteId || null,
       scroll: opts.scroll || null,
       cursor: opts.cursor || null,
     };
@@ -376,6 +400,20 @@
       showAlert("Read-only", "PDF tabs are view-only. Use File → Open PDF as Text to get an editable copy of the text.");
       return false;
     }
+    if (tab.noteId && !saveAs) {
+      // This tab lives in Apple Notes — save back into the same note
+      const content = tab.doc.getValue("\n");
+      const res = await backend.notesSave(tab.noteId, content);
+      if (res.error) { showAlert("Apple Notes", res.error); return false; }
+      tab.name = res.name || tab.name;
+      tab.forceDirty = false;
+      tab.cleanGen = tab.doc.changeGeneration();
+      renderTabs();
+      updateStatus();
+      updateTitle();
+      scheduleSessionSave();
+      return true;
+    }
     let path = tab.path;
     if (!path || saveAs) {
       path = await backend.saveDialog(tab.name.includes(".") ? tab.name : tab.name + ".txt",
@@ -397,6 +435,7 @@
     if (res.error) { showAlert("Save failed", res.error); return false; }
     if (res.encoding) tab.encoding = res.encoding;
     if (res.mtime != null) tab.mtime = res.mtime;
+    tab.noteId = null;   // Save As onto disk detaches the tab from Apple Notes
     tab.path = path;
     tab.name = path.split("/").pop();
     tab.lang = langForPath(path);
@@ -742,6 +781,7 @@
         return {
           path: t.path,
           name: t.name,
+          noteId: t.noteId || null,
           lang: t.lang.id,
           encoding: t.encoding,
           eol: t.eol,
@@ -794,6 +834,7 @@
         tab = newTab({
           path: st.path,
           name: st.name,
+          noteId: st.noteId || null,
           content: content || "",
           lang: langById(st.lang),
           encoding: st.encoding,
@@ -995,6 +1036,76 @@
     $("#st-pos").textContent = `Ln : ${pos.line + 1}    Col : ${pos.ch + 1}    Sel : ${selChars} | ${selLines}`;
     $("#st-eol").textContent = activeTab.eol === "\r\n" ? "Windows (CR LF)" : "Unix (LF)";
     $("#st-enc").textContent = activeTab.encoding;
+  }
+
+  // ======================================================================
+  // Apple Notes
+  // ======================================================================
+  async function openNoteTab(id) {
+    const existing = tabs.find((t) => t.noteId === id);
+    if (existing) { activateTab(existing); return; }
+    const res = await backend.notesGet(id);
+    if (res.error) { showAlert("Apple Notes", res.error); return; }
+    const tab = newTab({
+      name: res.name || "Note",
+      content: res.content || "",
+      lang: langById("text"),
+      encoding: "Apple Note",
+      noteId: id,
+    });
+    closeLoneUntitled(tab);
+    scheduleSessionSave();
+  }
+
+  async function openNotePicker() {
+    showModal("Open Apple Note",
+      '<input id="note-filter" type="text" placeholder="Type to filter notes…">' +
+      '<div id="note-list"><div class="note-empty">Loading notes…</div></div>',
+      [{ label: "Cancel" }]);
+    const listEl = $("#note-list");
+    const filterEl = $("#note-filter");
+    const res = await backend.notesList();
+    if (res.error) {
+      listEl.innerHTML = '<div class="note-empty">' + escapeHtml(res.error) + "</div>";
+      return;
+    }
+    const notes = res.notes || [];
+    const render = (filter) => {
+      const q = (filter || "").toLowerCase();
+      const shown = notes.filter((n) => !q || (n.name + " " + n.folder).toLowerCase().includes(q));
+      listEl.textContent = "";
+      if (!shown.length) {
+        listEl.innerHTML = '<div class="note-empty">No matching notes</div>';
+        return;
+      }
+      for (const n of shown.slice(0, 200)) {
+        const row = document.createElement("div");
+        row.className = "note-row";
+        const name = document.createElement("span");
+        name.textContent = n.name;
+        const folder = document.createElement("span");
+        folder.className = "note-folder";
+        folder.textContent = n.folder;
+        row.append(name, folder);
+        row.addEventListener("click", () => { hideModal(); openNoteTab(n.id); });
+        listEl.appendChild(row);
+      }
+    };
+    render("");
+    filterEl.addEventListener("input", () => render(filterEl.value));
+    filterEl.focus();
+  }
+
+  async function sendToNotes() {
+    const tab = activeTab;
+    if (!tab || tab.type === "pdf") {
+      showAlert("Apple Notes", "Switch to a text tab to send it to Apple Notes.");
+      return;
+    }
+    if (tab.noteId) { saveTab(tab); return; }   // already a note — just save it
+    const res = await backend.notesSave(null, tab.doc.getValue("\n"));
+    if (res.error) { showAlert("Apple Notes", res.error); return; }
+    showAlert("Apple Notes", 'Saved to Apple Notes as "' + (res.name || "Untitled") + '".');
   }
 
   // ======================================================================
@@ -1315,6 +1426,8 @@
       zoomOut: () => { settings.fontSize = Math.max(settings.fontSize - 1, 8); applyFontSize(); scheduleSessionSave(); },
       zoomReset: () => { settings.fontSize = 13; applyFontSize(); scheduleSessionSave(); },
       pdfToText,
+      openNote: openNotePicker,
+      sendToNotes,
       runFile: runActiveFile,
       runShellCommand: runShellCommandUI,
       runStop: () => backend.runStop(),

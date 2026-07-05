@@ -409,3 +409,24 @@ body {
   border-radius: 3px;
 }
 #modal-buttons button:hover { border-color: #316AC5; }
+
+/* Apple Notes picker */
+#note-list {
+  margin-top: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #B5B1A4;
+  background: #fff;
+}
+.note-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 9px;
+  border-bottom: 1px solid #EFEFEF;
+}
+.note-row:hover { background: #316AC5; color: #fff; }
+.note-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-folder { color: #888; font-size: 12px; flex: 0 0 auto; }
+.note-row:hover .note-folder { color: #dbe6ff; }
+.note-empty { padding: 14px; color: #777; text-align: center; white-space: pre-wrap; }

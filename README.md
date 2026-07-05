@@ -36,6 +36,12 @@ the system WKWebView — so there's no bundled browser and the app stays small.
 - **Opens from Finder** — the built app registers itself for text, code,
   and PDF files, so right-click → *Open With* → **Notepad--** works, and
   double-clicked files open in the editor at launch
+- **Apple Notes** — *File → Open Apple Note…* lists your notes (filter-as-
+  you-type), opens one as a tab, and ⌘S saves your edits back into Apple
+  Notes; *Send Tab to Apple Notes* turns any tab into a new note. Uses
+  macOS automation — the first use asks permission to control Notes.
+  Formatting is flattened to plain text while editing (lists become
+  "- item" lines); Save As to a file detaches the tab from Notes.
 - **PDF viewing** — open a `.pdf` and it renders in a read-only tab
   ([PDF.js](https://mozilla.github.io/pdf.js/), vendored, works offline):
   page navigation, zoom/fit-width, ⌘L go-to-page, text selection, and ⌘F

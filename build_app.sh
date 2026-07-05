@@ -46,6 +46,11 @@ info["CFBundleDocumentTypes"] = [
     },
 ]
 info["NSHighResolutionCapable"] = True
+# Required for the "Notepad-- wants to control Notes" permission prompt
+info["NSAppleEventsUsageDescription"] = (
+    "Notepad-- opens and saves your Apple Notes when you use the "
+    "File > Open Apple Note and Send Tab to Apple Notes commands."
+)
 
 with open(plist_path, "wb") as f:
     plistlib.dump(info, f)
