@@ -12,8 +12,10 @@ import html as htmllib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 import threading
 
 import webview
@@ -55,6 +57,7 @@ class Api:
     def __init__(self):
         self.window = None
         self._proc = None
+        self._proc_lock = threading.Lock()
 
     def get_startup_files(self):
         return STARTUP_FILES
@@ -75,7 +78,8 @@ class Api:
     # ---- file I/O ------------------------------------------------------
     MAX_TEXT_BYTES = 64 * 1024 * 1024
     MAX_PDF_BYTES = 256 * 1024 * 1024
-    CODECS = {"UTF-8": "utf-8", "UTF-8-BOM": "utf-8-sig", "ANSI": "latin-1"}
+    CODECS = {"UTF-8": "utf-8", "UTF-8-BOM": "utf-8-sig", "ANSI": "latin-1",
+              "UTF-16": "utf-16"}
 
     def _size_guard(self, path, limit):
         try:
@@ -100,6 +104,9 @@ class Api:
         if raw.startswith(b"\xef\xbb\xbf"):
             text = raw.decode("utf-8-sig")
             encoding = "UTF-8-BOM"
+        elif raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+            text = raw.decode("utf-16")   # BOM selects the byte order
+            encoding = "UTF-16"
         else:
             try:
                 text = raw.decode("utf-8")
@@ -136,12 +143,29 @@ class Api:
             # e.g. an emoji typed into an ANSI file — fall back rather than fail
             data = content.encode("utf-8")
             encoding = "UTF-8"
+        # Atomic save: write a sibling temp file, then rename over the target,
+        # so a crash or full disk mid-write can never destroy the original.
+        tmp = None
         try:
-            with open(path, "wb") as f:
+            fd, tmp = tempfile.mkstemp(
+                dir=os.path.dirname(path) or ".", prefix=".notepad-save-")
+            with os.fdopen(fd, "wb") as f:
                 f.write(data)
+            try:
+                os.chmod(tmp, os.stat(path).st_mode)   # keep original permissions
+            except OSError:
+                pass                                    # new file: default perms
+            os.replace(tmp, path)
+            tmp = None
             return {"ok": True, "encoding": encoding, "mtime": os.path.getmtime(path)}
         except OSError as exc:
             return {"error": str(exc)}
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     # ---- session (Notepad++-style "never lose a note") ------------------
     def load_session(self):
@@ -194,34 +218,65 @@ class Api:
     def run_stop(self):
         proc = self._proc
         if proc and proc.poll() is None:
-            proc.terminate()
+            # Kill the whole process group — a bare terminate() only reaches
+            # the wrapping shell, leaving grandchildren (servers etc.) alive
+            def signal_group(sig):
+                try:
+                    os.killpg(os.getpgid(proc.pid), sig)
+                except (OSError, ProcessLookupError):
+                    proc.terminate() if sig == signal.SIGTERM else proc.kill()
+            signal_group(signal.SIGTERM)
             try:
                 proc.wait(2)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                signal_group(signal.SIGKILL)
             return {"ok": True}
         return {"ok": False}
 
     def _spawn(self, cmd, shell, cwd):
-        if self._proc and self._proc.poll() is None:
-            return {"error": "A process is already running — stop it first.\n"}
         env = os.environ.copy()
         # GUI apps on macOS get a minimal PATH; add the usual tool locations
         env["PATH"] = ":".join([env.get("PATH", "/usr/bin:/bin"),
                                 "/usr/local/bin", "/opt/homebrew/bin"])
-        try:
-            self._proc = subprocess.Popen(
-                cmd, shell=shell, cwd=cwd or None, env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL, text=True, errors="replace", bufsize=1)
-        except OSError as exc:
-            return {"error": str(exc) + "\n"}
-        proc = self._proc
+        with self._proc_lock:
+            if self._proc and self._proc.poll() is None:
+                return {"error": "A process is already running — stop it first.\n"}
+            try:
+                self._proc = subprocess.Popen(
+                    cmd, shell=shell, cwd=cwd or None, env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL, text=True, errors="replace",
+                    bufsize=1, start_new_session=True)
+            except OSError as exc:
+                return {"error": str(exc) + "\n"}
+            proc = self._proc
+
+        # Batch output lines and flush every 50ms: streaming line-by-line
+        # through evaluate_js can flood the macOS main thread
+        buf = {"out": [], "err": []}
+        buf_lock = threading.Lock()
+
+        def flush():
+            with buf_lock:
+                chunks = [(name, "".join(lines)) for name, lines in buf.items() if lines]
+                for name in buf:
+                    buf[name] = []
+            for name, text in chunks:
+                self._emit_output(name, text)
 
         def pump(pipe, name):
             for line in iter(pipe.readline, ""):
-                self._emit_output(name, line)
+                with buf_lock:
+                    buf[name].append(line)
             pipe.close()
+
+        def flusher():
+            tick = threading.Event()
+            while proc.poll() is None:
+                flush()
+                tick.wait(0.05)
+
+        threading.Thread(target=flusher, daemon=True).start()
 
         pumps = [threading.Thread(target=pump, args=(proc.stdout, "out"), daemon=True),
                  threading.Thread(target=pump, args=(proc.stderr, "err"), daemon=True)]
@@ -232,6 +287,7 @@ class Api:
             code = proc.wait()
             for t in pumps:          # let the last output lines land first
                 t.join(timeout=3)
+            flush()
             self._emit_js("window.__runDone && window.__runDone(%d)" % code)
 
         threading.Thread(target=wait, daemon=True).start()
@@ -280,13 +336,18 @@ JSON.stringify(out.slice(0, 500));
     @staticmethod
     def _html_to_text(body):
         """Apple Notes bodies are HTML; flatten to editable plain text."""
-        s = re.sub(r"<br[^>]*>", "\n", body, flags=re.I)
+        # An empty paragraph is <div><br></div>; drop the <br> so it becomes
+        # exactly one newline and blank-line structure round-trips unchanged
+        s = re.sub(r"<br[^>]*>\s*</div>", "</div>", body, flags=re.I)
+        # A heading/list closing right before its wrapping div would emit two
+        # newlines for one visual line break — drop the inner close
+        s = re.sub(r"</(?:h1|h2|h3|ul|ol)>\s*(?=</div>)", "", s, flags=re.I)
+        s = re.sub(r"<br[^>]*>", "\n", s, flags=re.I)
         s = re.sub(r"<li[^>]*>", "- ", s, flags=re.I)
         s = re.sub(r"</(?:li|div|h1|h2|h3|ul|ol)>\s*", "\n", s, flags=re.I)
         s = re.sub(r"<[^>]+>", "", s)
         s = htmllib.unescape(s)
-        s = re.sub(r"\n{3,}", "\n\n", s)
-        return s.strip("\n")
+        return s.rstrip("\n")
 
     @staticmethod
     def _text_to_html(text):

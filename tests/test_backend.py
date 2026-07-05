@@ -82,6 +82,22 @@ r5 = api.read_file(p5)
 assert "error" in r5 and "64 MB" in r5["error"], r5
 ok("oversized file refused with clear message")
 
+p6 = os.path.join(d, "u16.txt")
+open(p6, "wb").write("héllo utf16".encode("utf-16"))
+r6 = api.read_file(p6)
+assert r6["encoding"] == "UTF-16" and r6["content"] == "héllo utf16", r6
+api.write_file(p6, r6["content"], r6["encoding"], None)
+assert open(p6, "rb").read().decode("utf-16") == "héllo utf16"
+ok("UTF-16 BOM detected and round-trips")
+
+# atomic save: a failed write must never truncate the original
+p7 = os.path.join(d, "precious.txt")
+open(p7, "w").write("original content")
+r7 = api.write_file(os.path.join(d, "no-such-dir", "x.txt"), "y", "UTF-8", None)
+assert "error" in r7
+assert open(p7).read() == "original content"
+ok("atomic save: failures cannot damage existing files")
+
 # ---- script runner ---------------------------------------------------------
 api = app.Api()
 api.window = FakeWindow()
@@ -131,6 +147,11 @@ ok("plain text converts to escaped Notes HTML")
 
 assert api._html_to_text(api._text_to_html("line1\n\nline2 & three")) == "line1\n\nline2 & three"
 ok("Notes text/HTML round-trip is stable")
+
+# blank-line runs survive a round-trip exactly (no silent reflow on save)
+for sample in ["a\n\n\n\nb", "a\n\nb\n\n\nc", "solo"]:
+    assert api._html_to_text(api._text_to_html(sample)) == sample, repr(sample)
+ok("multiple consecutive blank lines round-trip unchanged")
 
 if sys.platform != "darwin":
     r = api.notes_list()

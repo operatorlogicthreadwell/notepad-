@@ -401,13 +401,16 @@
       return false;
     }
     if (tab.noteId && !saveAs) {
-      // This tab lives in Apple Notes — save back into the same note
+      // This tab lives in Apple Notes — save back into the same note.
+      // Capture the generation BEFORE the async write: keystrokes typed
+      // while saving must stay marked dirty.
       const content = tab.doc.getValue("\n");
+      const savedGen = tab.doc.changeGeneration();
       const res = await backend.notesSave(tab.noteId, content);
       if (res.error) { showAlert("Apple Notes", res.error); return false; }
       tab.name = res.name || tab.name;
       tab.forceDirty = false;
-      tab.cleanGen = tab.doc.changeGeneration();
+      tab.cleanGen = savedGen;
       renderTabs();
       updateStatus();
       updateTitle();
@@ -421,6 +424,7 @@
       if (!path) return false;
     }
     const content = tab.doc.getValue(tab.eol);
+    const savedGen = tab.doc.changeGeneration();   // typing during the save stays dirty
     // Only guard against disk conflicts when overwriting the file we read
     const guardMtime = !saveAs && path === tab.path ? tab.mtime : null;
     let res = await backend.writeFile(path, content, tab.encoding, guardMtime);
@@ -441,7 +445,7 @@
     tab.lang = langForPath(path);
     if (tab === activeTab) cm.setOption("mode", tab.lang.mime);
     tab.forceDirty = false;
-    tab.cleanGen = tab.doc.changeGeneration();
+    tab.cleanGen = savedGen;
     renderTabs();
     updateStatus();
     updateTitle();
@@ -455,6 +459,14 @@
       if (isDirty(tab) || !tab.path) await saveTab(tab);
     }
   }
+
+  // Find-bar elements (declared before the PDF module, which shares them)
+  const findbar = $("#findbar");
+  const findInput = $("#find-input");
+  const replaceInput = $("#replace-input");
+  const caseCB = $("#find-case");
+  const regexCB = $("#find-regex");
+  const findCount = $("#find-count");
 
   // ======================================================================
   // PDF viewer (PDF.js) — read-only tabs with lazy page rendering
@@ -606,10 +618,12 @@
   function pdfTrackScroll() {
     if (!activeTab || activeTab.type !== "pdf") return;
     const tab = activeTab;
-    const y = pdfScroll.scrollTop + pdfScroll.clientHeight / 2;
+    // Rect math, not offsetTop: pages have no positioned ancestor, so their
+    // offsetTop is body-relative and disagrees with the scroller's coordinates
+    const midline = pdfScroll.getBoundingClientRect().top + pdfScroll.clientHeight / 2;
     let current = 1;
     for (const ph of pdfPagesEl.children) {
-      if (ph.offsetTop <= y) current = +ph.dataset.page;
+      if (ph.getBoundingClientRect().top <= midline) current = +ph.dataset.page;
       else break;
     }
     if (current !== tab.page) {
@@ -755,9 +769,23 @@
   // Session persistence (Notepad++-style)
   // ======================================================================
   let sessionTimer = null;
+  let sessionSaveWarned = false;
+  async function persistSession() {
+    let res;
+    try { res = await backend.saveSession(buildSession()); }
+    catch (e) { res = { error: String(e) }; }
+    if (res && res.error && res.error !== "not ready" && !sessionSaveWarned) {
+      // Warn once: silent failure here means unsaved tabs won't survive a quit
+      sessionSaveWarned = true;
+      showAlert("Session backup failed",
+        "Notepad-- couldn't save your session — unsaved tabs may not survive quitting.\n\n" + res.error);
+    } else if (res && res.ok) {
+      sessionSaveWarned = false;
+    }
+  }
   function scheduleSessionSave() {
     clearTimeout(sessionTimer);
-    sessionTimer = setTimeout(() => backend.saveSession(buildSession()), 800);
+    sessionTimer = setTimeout(persistSession, 800);
   }
 
   function buildSession() {
@@ -785,6 +813,7 @@
           lang: t.lang.id,
           encoding: t.encoding,
           eol: t.eol,
+          mtime: t.mtime != null ? t.mtime : null,   // keeps conflict protection across restarts
           dirty,
           // keep text for anything not safely on disk
           content: dirty || !t.path ? t.doc.getValue() : null,
@@ -798,7 +827,7 @@
   // Flush the session whenever the window loses foreground or starts closing,
   // so at most a fraction of a second of typing is ever at risk.
   function flushSession() {
-    try { backend.saveSession(buildSession()); } catch (e) { /* mid-boot */ }
+    try { persistSession(); } catch (e) { /* mid-boot */ }
   }
   window.addEventListener("beforeunload", flushSession);
   window.addEventListener("pagehide", flushSession);
@@ -813,21 +842,22 @@
     untitledCounter = s.untitledCounter || 0;
     Object.assign(settings, s.settings || {});
     let toActivate = null;
+    const missing = [];
     for (let i = 0; i < s.tabs.length; i++) {
       const st = s.tabs[i];
       let tab = null;
       if (st.type === "pdf") {
         if (!st.path) continue;                    // browser-demo PDFs can't be reopened
         const res = await backend.readFileB64(st.path);
-        if (res.error) continue;                   // file vanished since last session
+        if (res.error) { missing.push(st.name || st.path); continue; }
         tab = await openPdfBytes(base64ToBytes(res.data), st.path, st.name,
                                  { page: st.page, zoom: st.fit ? null : st.zoom, activate: false });
       } else {
         let content = st.content;
-        let mtime = null;
+        let mtime = st.mtime != null ? st.mtime : null;
         if (content == null && st.path) {
           const res = await backend.readFile(st.path);
-          if (res.error) continue;             // file vanished since last session
+          if (res.error) { missing.push(st.name || st.path); continue; }
           content = res.content.replace(/\r\n/g, "\n");
           mtime = res.mtime;
         }
@@ -848,19 +878,18 @@
       }
       if (i === (s.activeIndex || 0) && tab) toActivate = tab;
     }
-    if (tabs.length === 0) { newTab(); return; }
-    activateTab(toActivate || tabs[tabs.length - 1]);
+    if (tabs.length === 0) newTab();
+    else activateTab(toActivate || tabs[tabs.length - 1]);
+    if (missing.length) {
+      showAlert("Some tabs couldn't be reopened",
+        "These files from your last session are missing or unreadable:\n\n" +
+        missing.join("\n"));
+    }
   }
 
   // ======================================================================
   // Find / Replace
   // ======================================================================
-  const findbar = $("#findbar");
-  const findInput = $("#find-input");
-  const replaceInput = $("#replace-input");
-  const caseCB = $("#find-case");
-  const regexCB = $("#find-regex");
-  const findCount = $("#find-count");
   let searchOverlay = null;
   let overlayTimer = null;
 
@@ -915,7 +944,9 @@
     const cursor = cm.getSearchCursor(currentQuery(), CodeMirror.Pos(cm.firstLine(), 0),
                                       { caseFold: !caseCB.checked });
     while (cursor.findNext() && n < 10000) n++;
-    findCount.textContent = n === 0 ? "no matches" : n + (n === 1 ? " match" : " matches");
+    findCount.textContent = n === 0 ? "no matches"
+      : n >= 10000 ? "10000+ matches"
+      : n + (n === 1 ? " match" : " matches");
     if (n === 0) findInput.classList.add("notfound");
   }
 
@@ -1115,7 +1146,6 @@
   const consoleOut = document.getElementById("console-out");
   const consoleStatus = document.getElementById("console-status");
   const consoleCmd = document.getElementById("console-cmd");
-  let running = false;
   const cmdHistory = [];
   let cmdHistoryIdx = -1;
 
@@ -1141,7 +1171,6 @@
 
   window.__runOutput = (text, stream) => appendConsole(text, stream);
   window.__runDone = (code) => {
-    running = false;
     setRunStatus(code === 0 ? "finished (exit 0)" : "failed (exit " + code + ")",
                  code === 0 ? "ok" : "fail");
   };
@@ -1149,11 +1178,9 @@
   async function startRun(promise) {
     showConsole(true);
     setRunStatus("running…", "run");
-    running = true;
     const res = await promise;
     if (res && res.error) {
       appendConsole(res.error, "err");
-      running = false;
       setRunStatus("failed", "fail");
     }
   }

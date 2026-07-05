@@ -2,10 +2,14 @@
 
 What you should be able to do with the app, and how each story is verified.
 
-**Test legend** — `ui`, `pdf`, `run`, `notes` = automated browser suites in
-`tests/browser/` (run in Chromium against the real UI); `backend` =
+**Test legend** — `ui`, `pdf`, `run`, `notes`, `torture` = automated browser
+suites in `tests/browser/` (run in Chromium against the real UI); `backend` =
 `tests/test_backend.py` (Python unit tests); **manual-macOS** = only
 verifiable on a real Mac (dialogs, Finder, Notes automation, quitting).
+
+Beyond the suites, the code has been through ESLint/pyflakes static
+analysis and three independent adversarial reviews (frontend state
+machine, Python backend, JS↔Python bridge contract).
 
 ## Editing
 

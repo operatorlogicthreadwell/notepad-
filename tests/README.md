@@ -9,9 +9,15 @@ manually — see `docs/USER_STORIES.md` for exactly what that covers).
 python3 tests/test_backend.py
 ```
 
-Covers file I/O (encodings, BOM, conflict detection, size guards), the
-script runner (streaming, exit codes, stop, busy-refusal), and the Apple
-Notes HTML↔text conversion.
+Covers file I/O (encodings, UTF-8/UTF-16 BOMs, atomic saves, conflict
+detection, size guards), the script runner (streaming, exit codes,
+process-group stop, busy-refusal), and the Apple Notes HTML↔text
+conversion including blank-line round-trip fidelity.
+
+The torture suite (`test_torture.js`) additionally attacks the app with
+corrupted sessions, degenerate regexes, broken/empty PDFs, 100k-line
+documents, astral-plane unicode, and a 250-action seeded monkey test that
+fails on any JavaScript error.
 
 ## Browser UI tests (playwright-core + a Chromium)
 
@@ -24,6 +30,7 @@ CHROMIUM_PATH=/path/to/chromium node tests/browser/test_ui.js     # core editor:
 CHROMIUM_PATH=/path/to/chromium node tests/browser/test_pdf.js    # PDF viewer: 12 tests
 CHROMIUM_PATH=/path/to/chromium node tests/browser/test_run.js    # run console: 7 tests
 CHROMIUM_PATH=/path/to/chromium node tests/browser/test_notes.js  # Apple Notes UI: 8 tests
+CHROMIUM_PATH=/path/to/chromium node tests/browser/test_torture.js # abuse/fuzz: 9 tests
 ```
 
 `CHROMIUM_PATH` defaults to the Claude Code container's preinstalled
