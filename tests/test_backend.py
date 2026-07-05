@@ -6,6 +6,7 @@ Run:  python3 tests/test_backend.py
 """
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -157,5 +158,45 @@ if sys.platform != "darwin":
     r = api.notes_list()
     assert "error" in r and "macOS" in r["error"], r
     ok("Notes integration errors gracefully off-macOS")
+
+# ---- provider-agnostic AI config -------------------------------------------
+app.CONFIG_FILE = os.path.join(tempfile.mkdtemp(), "config.json")
+api = app.Api()
+os.environ.pop("ANTHROPIC_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
+
+cfg = api.get_ai_config()
+assert cfg["provider"] == "anthropic" and cfg["model"] == "claude-opus-4-8", cfg
+assert not cfg["has_key"]
+ok("default provider is Anthropic with sane model default")
+
+r = api.set_ai_config("openai", "sk-oai-1", "gpt-5", "")
+assert r["provider"] == "openai" and r["has_key"] and r["key_source"] == "settings", r
+r = api.set_ai_config("anthropic", "sk-ant-1", "", "")
+assert r["provider"] == "anthropic" and r["has_key"], r
+r = api.set_ai_config("openai", "", "", "")
+assert r["has_key"], "openai key forgotten when switching back"
+ok("per-provider keys and models are remembered independently")
+
+r = api.set_ai_config("custom", "", "llama3.3", "http://localhost:11434/v1")
+assert r["has_key"] and r["key_source"] == "optional", r
+assert r["base_url"] == "http://localhost:11434/v1", r
+ok("custom endpoints need no key; base_url stored")
+
+api.set_ai_config("custom", "", "", "")   # clear base_url
+r = api.ai_analyze("text", None)
+assert "error" in r and "base URL" in r["error"], r
+ok("custom provider without endpoint gets setup guidance")
+
+r = api.set_ai_config("bogus-provider", "", "", None)
+assert r["provider"] in app.Api.AI_PROVIDERS, r
+ok("unknown provider names are rejected safely")
+
+# legacy single-key config migrates to the anthropic slot
+with open(app.CONFIG_FILE, "w") as f:
+    json.dump({"api_key": "sk-legacy", "model": "claude-opus-4-8"}, f)
+cfg = api.get_ai_config()
+assert cfg["provider"] == "anthropic" and cfg["has_key"] and cfg["key_source"] == "settings", cfg
+ok("pre-provider config migrates automatically")
 
 print("\n%d backend tests passed" % PASS)

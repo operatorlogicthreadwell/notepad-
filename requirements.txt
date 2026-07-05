@@ -1,2 +1,4 @@
 pywebview>=5.0
+# AI providers for the Decide panel (install the one(s) you use):
 anthropic>=0.90
+openai>=1.60

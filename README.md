@@ -57,9 +57,11 @@ the system WKWebView — so there's no bundled browser and the app stays small.
   Claude API and streams back a decision brief: what's being decided, the
   options with trade-offs, risks, a recommendation, and next actions. Ask
   free-form questions about the document in the same panel. Works on text
-  tabs and PDFs (via extracted text). Set your API key once under
-  Decide → Claude API Settings (stored locally with 0600 permissions;
-  requires `pip3 install anthropic`).
+  tabs and PDFs (via extracted text). **Provider-agnostic**: use Claude
+  (Anthropic), OpenAI, or any OpenAI-compatible endpoint — including a
+  local Ollama server for fully offline, free analysis. Configure once
+  under Decide → AI Provider Settings (keys stored locally with 0600
+  permissions; `pip3 install anthropic` and/or `openai`).
 - **Opens from Finder** — the built app registers itself for text, code,
   and PDF files, so right-click → *Open With* → **Notepad--** works, and
   double-clicked files open in the editor at launch

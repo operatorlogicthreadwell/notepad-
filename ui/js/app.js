@@ -155,14 +155,22 @@
       return { ok: true };
     },
 
-    // Decision intelligence — Claude API on the Mac, canned demo in the browser
+    // Decision intelligence — provider-agnostic on the Mac, canned demo here
+    _shimAiCfg: { provider: "anthropic", base_url: "",
+                  models: { anthropic: "claude-opus-4-8", openai: "gpt-5", custom: "llama3.3" } },
     async aiConfig() {
       if (!this.isShim) return this.api.get_ai_config();
-      return { has_key: true, key_source: "demo", model: "claude-opus-4-8" };
+      const c = this._shimAiCfg;
+      return { provider: c.provider, model: c.models[c.provider], models: { ...c.models },
+               has_key: true, key_source: "demo", base_url: c.base_url };
     },
-    async aiSetConfig(key, model) {
-      if (!this.isShim) return this.api.set_ai_config(key, model);
-      return { has_key: true, key_source: "demo", model: model || "claude-opus-4-8" };
+    async aiSetConfig(provider, key, model, baseUrl) {
+      if (!this.isShim) return this.api.set_ai_config(provider, key, model, baseUrl);
+      const c = this._shimAiCfg;
+      if (provider) c.provider = provider;
+      if (model) c.models[c.provider] = model;
+      if (baseUrl != null) c.base_url = baseUrl;
+      return this.aiConfig();
     },
     async aiAnalyze(text, question) {
       if (!this.isShim) return this.api.ai_analyze(text, question || null);
@@ -1678,23 +1686,45 @@
   async function aiSettingsDialog() {
     const cfg = await backend.aiConfig();
     const current = cfg.has_key
-      ? "A key is configured (from " + escapeHtml(cfg.key_source || "settings") + ")."
+      ? "Key: " + escapeHtml(cfg.key_source || "settings") + "."
       : "No key configured yet.";
-    showModal("Claude API Settings",
-      "<div>" + current + " Get a key at platform.claude.com.</div>" +
-      '<label style="display:block;margin-top:10px">API key' +
-      ' (leave blank to keep current):</label><input id="ai-key" type="password">' +
+    showModal("AI Provider Settings",
+      "<div>" + current + "</div>" +
+      '<label style="display:block;margin-top:10px">Provider:</label>' +
+      '<select id="ai-provider" style="width:100%;padding:4px;border:1px solid #7F9DB9">' +
+      '<option value="anthropic">Claude (Anthropic)</option>' +
+      '<option value="openai">OpenAI</option>' +
+      '<option value="custom">OpenAI-compatible (Ollama, OpenRouter, Groq…)</option>' +
+      "</select>" +
+      '<label style="display:block;margin-top:8px">API key' +
+      " (blank = keep current; optional for local servers):</label>" +
+      '<input id="ai-key" type="password">' +
       '<label style="display:block;margin-top:8px">Model:</label>' +
-      '<input id="ai-model" type="text">',
+      '<input id="ai-model" type="text">' +
+      '<div id="ai-baseurl-row"><label style="display:block;margin-top:8px">Base URL' +
+      " (OpenAI-compatible servers only):</label>" +
+      '<input id="ai-baseurl" type="text" placeholder="http://localhost:11434/v1"></div>',
       [{ label: "Save", onClick: async () => {
-          const key = document.getElementById("ai-key") ? document.getElementById("ai-key").value.trim() : "";
-          const model = document.getElementById("ai-model") ? document.getElementById("ai-model").value.trim() : "";
-          const res = await backend.aiSetConfig(key, model);
+          const get = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
+          const res = await backend.aiSetConfig(
+            get("ai-provider"), get("ai-key"), get("ai-model"), get("ai-baseurl"));
           if (res.error) showAlert("Settings", res.error);
         } },
        { label: "Cancel" }]);
+    const providerSel = document.getElementById("ai-provider");
     const modelInput = document.getElementById("ai-model");
-    if (modelInput) modelInput.value = cfg.model || "claude-opus-4-8";
+    const baseRow = document.getElementById("ai-baseurl-row");
+    const baseInput = document.getElementById("ai-baseurl");
+    if (!providerSel) return;
+    providerSel.value = cfg.provider || "anthropic";
+    modelInput.value = cfg.model || "";
+    baseInput.value = cfg.base_url || "";
+    const sync = () => {
+      modelInput.value = (cfg.models && cfg.models[providerSel.value]) || "";
+      baseRow.style.display = providerSel.value === "custom" ? "" : "none";
+    };
+    providerSel.addEventListener("change", sync);
+    baseRow.style.display = providerSel.value === "custom" ? "" : "none";
   }
 
   function setupInsight() {

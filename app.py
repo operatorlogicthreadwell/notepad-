@@ -87,6 +87,14 @@ the context needed to act on the answer."""
 STARTUP_FILES = [a for a in sys.argv[1:] if not a.startswith("-") and os.path.isfile(a)]
 
 
+class _AiError(Exception):
+    """A provider failure with a user-facing explanation."""
+
+    def __init__(self, friendly):
+        super().__init__(friendly)
+        self.friendly = friendly
+
+
 class Api:
     """Methods callable from JavaScript via window.pywebview.api.*"""
 
@@ -256,53 +264,94 @@ class Api:
         except OSError as exc:
             return {"error": str(exc)}
 
-    # ---- decision intelligence (Claude API) -------------------------------
+    # ---- decision intelligence (provider-agnostic) ------------------------
+    # anthropic — Claude via the official SDK
+    # openai    — OpenAI via the official SDK
+    # custom    — any OpenAI-compatible endpoint (Ollama, OpenRouter, Groq, …)
+    AI_PROVIDERS = ("anthropic", "openai", "custom")
+    DEFAULT_MODELS = {"anthropic": "claude-opus-4-8", "openai": "gpt-5",
+                      "custom": "llama3.3"}
+    ENV_KEYS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
+                "custom": None}
+
     def _config(self):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                cfg = json.load(f)
         except (OSError, ValueError):
-            return {}
+            cfg = {}
+        # migrate the pre-provider config shape (single Anthropic key/model)
+        if "api_key" in cfg:
+            cfg.setdefault("keys", {}).setdefault("anthropic", cfg.pop("api_key"))
+        if "model" in cfg:
+            cfg.setdefault("models", {}).setdefault("anthropic", cfg.pop("model"))
+        return cfg
+
+    def _write_config(self, cfg):
+        tmp = CONFIG_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        os.replace(tmp, CONFIG_FILE)
+        os.chmod(CONFIG_FILE, 0o600)   # the file holds API keys
 
     def get_ai_config(self):
         cfg = self._config()
-        has_key = bool(cfg.get("api_key")) or bool(os.environ.get("ANTHROPIC_API_KEY"))
-        return {"has_key": has_key,
-                "key_source": "settings" if cfg.get("api_key")
-                              else ("environment" if os.environ.get("ANTHROPIC_API_KEY") else None),
-                "model": cfg.get("model") or "claude-opus-4-8"}
+        provider = cfg.get("provider") if cfg.get("provider") in self.AI_PROVIDERS else "anthropic"
+        keys = cfg.get("keys", {})
+        models = cfg.get("models", {})
+        env_var = self.ENV_KEYS.get(provider)
+        if keys.get(provider):
+            key_source = "settings"
+        elif env_var and os.environ.get(env_var):
+            key_source = "environment"
+        elif provider == "custom":
+            key_source = "optional"     # local endpoints usually need no key
+        else:
+            key_source = None
+        return {
+            "provider": provider,
+            "model": models.get(provider) or self.DEFAULT_MODELS[provider],
+            "models": {p: models.get(p) or self.DEFAULT_MODELS[p]
+                       for p in self.AI_PROVIDERS},
+            "has_key": key_source is not None,
+            "key_source": key_source,
+            "base_url": cfg.get("base_url") or "",
+        }
 
-    def set_ai_config(self, api_key, model):
+    def set_ai_config(self, provider, api_key, model, base_url):
         cfg = self._config()
+        if provider in self.AI_PROVIDERS:
+            cfg["provider"] = provider
+        target = cfg.get("provider", "anthropic")
         if api_key:                      # empty string = keep the stored key
-            cfg["api_key"] = api_key
+            cfg.setdefault("keys", {})[target] = api_key
         if model:
-            cfg["model"] = model
+            cfg.setdefault("models", {})[target] = model
+        if base_url is not None:
+            cfg["base_url"] = base_url.strip()
         try:
-            tmp = CONFIG_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(cfg, f)
-            os.replace(tmp, CONFIG_FILE)
-            os.chmod(CONFIG_FILE, 0o600)   # the file holds an API key
+            self._write_config(cfg)
             return self.get_ai_config()
         except OSError as exc:
             return {"error": str(exc)}
 
     def ai_analyze(self, text, question):
-        try:
-            import anthropic
-        except ImportError:
-            return {"error": "The 'anthropic' package isn't installed.\n"
-                             "Run:  pip3 install anthropic  and restart Notepad--."}
         cfg = self._config()
-        api_key = cfg.get("api_key") or None   # None → SDK env/profile resolution
-        model = cfg.get("model") or "claude-opus-4-8"
-        if not api_key and not os.environ.get("ANTHROPIC_API_KEY"):
-            return {"error": "No Claude API key configured.\n"
-                             "Open Decide → Claude API Settings and paste a key from "
-                             "platform.claude.com."}
-        if not self._ai_busy.acquire(blocking=False):
-            return {"error": "An analysis is already running.\n"}
+        provider = cfg.get("provider") if cfg.get("provider") in self.AI_PROVIDERS else "anthropic"
+        keys = cfg.get("keys", {})
+        env_var = self.ENV_KEYS.get(provider)
+        api_key = keys.get(provider) or (os.environ.get(env_var) if env_var else None)
+        model = cfg.get("models", {}).get(provider) or self.DEFAULT_MODELS[provider]
+        base_url = (cfg.get("base_url") or "").strip()
+
+        if provider != "custom" and not api_key:
+            return {"error": "No API key configured for %s.\n"
+                             "Open Decide → AI Provider Settings and paste one."
+                             % ("Claude (Anthropic)" if provider == "anthropic" else "OpenAI")}
+        if provider == "custom" and not base_url:
+            return {"error": "No endpoint configured.\nOpen Decide → AI Provider "
+                             "Settings and set the base URL of an OpenAI-compatible "
+                             "server (e.g. http://localhost:11434/v1 for Ollama)."}
 
         if question:
             prompt = ("Here is the document I have open:\n\n<document>\n%s\n</document>\n\n"
@@ -311,36 +360,86 @@ class Api:
             prompt = ("Here is the document I have open. Give me the decision brief.\n\n"
                       "<document>\n%s\n</document>" % text)
 
+        if provider == "anthropic":
+            return self._start_ai(self._stream_anthropic, api_key, model, None, prompt)
+        return self._start_ai(self._stream_openai_compat, api_key, model,
+                              base_url if provider == "custom" else None, prompt)
+
+    def _start_ai(self, streamer, api_key, model, base_url, prompt):
+        if not self._ai_busy.acquire(blocking=False):
+            return {"error": "An analysis is already running.\n"}
+
         def work():
             try:
-                client = anthropic.Anthropic(api_key=api_key)
-                with client.messages.stream(
-                    model=model,
-                    max_tokens=16000,
-                    thinking={"type": "adaptive"},
-                    system=DECIDE_SYSTEM,
-                    messages=[{"role": "user", "content": prompt}],
-                ) as stream:
-                    for chunk in stream.text_stream:
-                        self._emit_js("window.__aiOutput && window.__aiOutput(%s)"
-                                      % json.dumps(chunk))
+                streamer(api_key, model, base_url, prompt)
                 self._emit_js("window.__aiDone && window.__aiDone(null)")
-            except anthropic.AuthenticationError:
-                self._fail_ai("Your Claude API key was rejected — check it in "
-                              "Decide → Claude API Settings.")
-            except anthropic.RateLimitError:
-                self._fail_ai("Rate limited by the Claude API — wait a moment and retry.")
-            except anthropic.APIConnectionError:
-                self._fail_ai("Couldn't reach the Claude API — check your connection.")
-            except anthropic.APIStatusError as exc:
-                self._fail_ai("Claude API error (%s): %s" % (exc.status_code, exc.message))
-            except Exception as exc:
-                self._fail_ai(str(exc))
+            except Exception as exc:  # streamers raise _AiError with a friendly text
+                self._fail_ai(getattr(exc, "friendly", None) or str(exc))
             finally:
                 self._ai_busy.release()
 
         threading.Thread(target=work, daemon=True).start()
         return {"ok": True}
+
+    def _emit_ai_chunk(self, chunk):
+        if chunk:
+            self._emit_js("window.__aiOutput && window.__aiOutput(%s)" % json.dumps(chunk))
+
+    def _stream_anthropic(self, api_key, model, _base_url, prompt):
+        try:
+            import anthropic
+        except ImportError:
+            raise _AiError("The 'anthropic' package isn't installed.\n"
+                           "Run:  pip3 install anthropic  and restart Notepad--.")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            with client.messages.stream(
+                model=model,
+                max_tokens=16000,
+                thinking={"type": "adaptive"},
+                system=DECIDE_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            ) as stream:
+                for chunk in stream.text_stream:
+                    self._emit_ai_chunk(chunk)
+        except anthropic.AuthenticationError:
+            raise _AiError("Your Anthropic API key was rejected — check it in "
+                           "Decide → AI Provider Settings.")
+        except anthropic.RateLimitError:
+            raise _AiError("Rate limited by the Claude API — wait a moment and retry.")
+        except anthropic.APIConnectionError:
+            raise _AiError("Couldn't reach the Claude API — check your connection.")
+        except anthropic.APIStatusError as exc:
+            raise _AiError("Claude API error (%s): %s" % (exc.status_code, exc.message))
+
+    def _stream_openai_compat(self, api_key, model, base_url, prompt):
+        try:
+            import openai
+        except ImportError:
+            raise _AiError("The 'openai' package isn't installed.\n"
+                           "Run:  pip3 install openai  and restart Notepad--.")
+        try:
+            client = openai.OpenAI(api_key=api_key or "not-needed",
+                                   base_url=base_url or None)
+            stream = client.chat.completions.create(
+                model=model,
+                stream=True,
+                messages=[{"role": "system", "content": DECIDE_SYSTEM},
+                          {"role": "user", "content": prompt}],
+            )
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta:
+                    self._emit_ai_chunk(chunk.choices[0].delta.content)
+        except openai.AuthenticationError:
+            raise _AiError("The API key was rejected — check it in "
+                           "Decide → AI Provider Settings.")
+        except openai.RateLimitError:
+            raise _AiError("Rate limited by the provider — wait a moment and retry.")
+        except openai.APIConnectionError:
+            raise _AiError("Couldn't reach %s — is the server running?"
+                           % (base_url or "api.openai.com"))
+        except openai.APIStatusError as exc:
+            raise _AiError("Provider error (%s): %s" % (exc.status_code, exc.message))
 
     def _fail_ai(self, message):
         self._emit_js("window.__aiDone && window.__aiDone(%s)" % json.dumps(message))
