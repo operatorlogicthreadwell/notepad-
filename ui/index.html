@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notepad--</title>
+<link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===== Menu bar ===== -->
+<div id="menubar">
+  <div class="menu" data-menu="file">File
+    <div class="dropdown">
+      <div class="mi" data-cmd="new">New<span class="key">&#8984;N</span></div>
+      <div class="mi" data-cmd="open">Open&hellip;<span class="key">&#8984;O</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="save">Save<span class="key">&#8984;S</span></div>
+      <div class="mi" data-cmd="saveAs">Save As&hellip;<span class="key">&#8679;&#8984;S</span></div>
+      <div class="mi" data-cmd="saveAll">Save All</div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="closeTab">Close Tab<span class="key">&#8984;W</span></div>
+      <div class="mi" data-cmd="closeAll">Close All Tabs</div>
+    </div>
+  </div>
+  <div class="menu" data-menu="edit">Edit
+    <div class="dropdown">
+      <div class="mi" data-cmd="undo">Undo<span class="key">&#8984;Z</span></div>
+      <div class="mi" data-cmd="redo">Redo<span class="key">&#8679;&#8984;Z</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="cut">Cut<span class="key">&#8984;X</span></div>
+      <div class="mi" data-cmd="copy">Copy<span class="key">&#8984;C</span></div>
+      <div class="mi" data-cmd="paste">Paste<span class="key">&#8984;V</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="selectAll">Select All<span class="key">&#8984;A</span></div>
+    </div>
+  </div>
+  <div class="menu" data-menu="search">Search
+    <div class="dropdown">
+      <div class="mi" data-cmd="find">Find&hellip;<span class="key">&#8984;F</span></div>
+      <div class="mi" data-cmd="replace">Replace&hellip;<span class="key">&#8997;&#8984;F</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="findNext">Find Next<span class="key">&#8984;G</span></div>
+      <div class="mi" data-cmd="findPrev">Find Previous<span class="key">&#8679;&#8984;G</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="gotoLine">Go to Line&hellip;<span class="key">&#8984;L</span></div>
+    </div>
+  </div>
+  <div class="menu" data-menu="view">View
+    <div class="dropdown">
+      <div class="mi check" data-cmd="toggleWrap" id="mi-wrap">Word Wrap</div>
+      <div class="mi check" data-cmd="toggleLineNumbers" id="mi-linenumbers">Line Numbers</div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="zoomIn">Zoom In<span class="key">&#8984;+</span></div>
+      <div class="mi" data-cmd="zoomOut">Zoom Out<span class="key">&#8984;&minus;</span></div>
+      <div class="mi" data-cmd="zoomReset">Restore Default Zoom<span class="key">&#8984;0</span></div>
+    </div>
+  </div>
+  <div class="menu" data-menu="language">Language
+    <div class="dropdown" id="language-menu"><!-- filled by JS --></div>
+  </div>
+  <div class="menu" data-menu="help">?
+    <div class="dropdown">
+      <div class="mi" data-cmd="about">About Notepad--</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Toolbar ===== -->
+<div id="toolbar">
+  <button class="tb" data-cmd="new" title="New (&#8984;N)"><svg viewBox="0 0 16 16"><path d="M3 1h7l3 3v11H3z" fill="#fff" stroke="#666"/><path d="M10 1v3h3" fill="none" stroke="#666"/></svg></button>
+  <button class="tb" data-cmd="open" title="Open (&#8984;O)"><svg viewBox="0 0 16 16"><path d="M1 4h5l1 2h8v8H1z" fill="#F7D774" stroke="#B8860B"/><path d="M1 6h14l-2 8H1z" fill="#FFE9A0" stroke="#B8860B"/></svg></button>
+  <button class="tb" data-cmd="save" title="Save (&#8984;S)"><svg viewBox="0 0 16 16"><path d="M1 1h12l2 2v12H1z" fill="#4A79D9" stroke="#28457F"/><rect x="4" y="1" width="7" height="5" fill="#DCE6F7"/><rect x="3" y="9" width="10" height="6" fill="#DCE6F7"/></svg></button>
+  <button class="tb" data-cmd="saveAll" title="Save All"><svg viewBox="0 0 16 16"><path d="M4 1h11v11H4z" fill="#4A79D9" stroke="#28457F"/><path d="M1 4h11v11H1z" fill="#4A79D9" stroke="#28457F"/><rect x="3" y="10" width="7" height="4" fill="#DCE6F7"/></svg></button>
+  <span class="tbsep"></span>
+  <button class="tb" data-cmd="undo" title="Undo (&#8984;Z)"><svg viewBox="0 0 16 16"><path d="M6 3 2 7l4 4V8.5c3 0 6 .8 7 4 .4-5-3-7.5-7-7.5z" fill="#3E9B3E"/></svg></button>
+  <button class="tb" data-cmd="redo" title="Redo (&#8679;&#8984;Z)"><svg viewBox="0 0 16 16"><path d="M10 3l4 4-4 4V8.5c-3 0-6 .8-7 4-.4-5 3-7.5 7-7.5z" fill="#3E9B3E"/></svg></button>
+  <span class="tbsep"></span>
+  <button class="tb" data-cmd="cut" title="Cut (&#8984;X)"><svg viewBox="0 0 16 16"><path d="M4 2l4 7M12 2 8 9" stroke="#666" stroke-width="1.4" fill="none"/><circle cx="5" cy="12" r="2" fill="none" stroke="#C33" stroke-width="1.4"/><circle cx="11" cy="12" r="2" fill="none" stroke="#C33" stroke-width="1.4"/></svg></button>
+  <button class="tb" data-cmd="copy" title="Copy (&#8984;C)"><svg viewBox="0 0 16 16"><rect x="5" y="1" width="9" height="11" fill="#fff" stroke="#666"/><rect x="2" y="4" width="9" height="11" fill="#fff" stroke="#666"/></svg></button>
+  <button class="tb" data-cmd="paste" title="Paste (&#8984;V)"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="13" fill="#C9A227" stroke="#8A6D1D"/><rect x="5" y="1" width="6" height="3" fill="#ddd" stroke="#666"/><rect x="4" y="6" width="8" height="8" fill="#fff" stroke="#666"/></svg></button>
+  <span class="tbsep"></span>
+  <button class="tb" data-cmd="find" title="Find (&#8984;F)"><svg viewBox="0 0 16 16"><circle cx="6.5" cy="6.5" r="4" fill="none" stroke="#28457F" stroke-width="1.6"/><path d="M9.5 9.5 14 14" stroke="#28457F" stroke-width="2"/></svg></button>
+  <button class="tb" data-cmd="replace" title="Replace (&#8997;&#8984;F)"><svg viewBox="0 0 16 16"><circle cx="5.5" cy="5.5" r="3.2" fill="none" stroke="#28457F" stroke-width="1.4"/><path d="M8 8l3 3" stroke="#28457F" stroke-width="1.6"/><path d="M9 14h5m0 0-2-2m2 2-2 2" stroke="#3E9B3E" stroke-width="1.4" fill="none"/></svg></button>
+  <span class="tbsep"></span>
+  <button class="tb toggle" data-cmd="toggleWrap" id="tb-wrap" title="Word Wrap"><svg viewBox="0 0 16 16"><path d="M2 3h12M2 8h9a2.5 2.5 0 0 1 0 5H8m0 0 2-2m-2 2 2 2M2 13h4" stroke="#555" stroke-width="1.4" fill="none"/></svg></button>
+</div>
+
+<!-- ===== Tab bar ===== -->
+<div id="tabbar"></div>
+
+<!-- ===== Editor ===== -->
+<div id="editor-container"></div>
+
+<!-- ===== Find / Replace bar ===== -->
+<div id="findbar" class="hidden">
+  <div class="findrow">
+    <label>Find :</label>
+    <input id="find-input" type="text" spellcheck="false">
+    <button id="btn-find-prev" title="Find Previous (&#8679;&#8984;G)">&#9650;</button>
+    <button id="btn-find-next" title="Find Next (&#8984;G)">&#9660;</button>
+    <label class="cb"><input id="find-case" type="checkbox">Match case</label>
+    <label class="cb"><input id="find-regex" type="checkbox">Regex</label>
+    <span id="find-count"></span>
+    <button id="btn-find-close" class="closebtn" title="Close (Esc)">&#10005;</button>
+  </div>
+  <div class="findrow" id="replacerow">
+    <label>Replace :</label>
+    <input id="replace-input" type="text" spellcheck="false">
+    <button id="btn-replace">Replace</button>
+    <button id="btn-replace-all">Replace All</button>
+  </div>
+</div>
+
+<!-- ===== Status bar ===== -->
+<div id="statusbar">
+  <span id="st-lang" class="grow">Plain Text</span>
+  <span id="st-length">length : 0    lines : 1</span>
+  <span id="st-pos">Ln : 1    Col : 1    Sel : 0 | 0</span>
+  <span id="st-eol">Unix (LF)</span>
+  <span id="st-enc">UTF-8</span>
+  <span id="st-ins">INS</span>
+</div>
+
+<!-- ===== Modal (go to line / about) ===== -->
+<div id="modal-backdrop" class="hidden">
+  <div id="modal">
+    <div id="modal-title"></div>
+    <div id="modal-body"></div>
+    <div id="modal-buttons"></div>
+  </div>
+</div>
+
+<script src="vendor/codemirror/codemirror.min.js"></script>
+<script src="vendor/codemirror/addon/search/searchcursor.min.js"></script>
+<script src="vendor/codemirror/addon/selection/active-line.min.js"></script>
+<script src="vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="vendor/codemirror/mode/xml.min.js"></script>
+<script src="vendor/codemirror/mode/javascript.min.js"></script>
+<script src="vendor/codemirror/mode/css.min.js"></script>
+<script src="vendor/codemirror/mode/htmlmixed.min.js"></script>
+<script src="vendor/codemirror/mode/python.min.js"></script>
+<script src="vendor/codemirror/mode/markdown.min.js"></script>
+<script src="vendor/codemirror/mode/shell.min.js"></script>
+<script src="vendor/codemirror/mode/clike.min.js"></script>
+<script src="vendor/codemirror/mode/yaml.min.js"></script>
+<script src="vendor/codemirror/mode/sql.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

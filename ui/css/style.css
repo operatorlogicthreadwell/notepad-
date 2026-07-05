@@ -1,0 +1,271 @@
+/* Notepad-- : classic Notepad++ look */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  background: #ECE9D8;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== Menu bar ===== */
+#menubar {
+  display: flex;
+  background: #F0EFE2;
+  border-bottom: 1px solid #D4D0C8;
+  padding: 0 2px;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 50;
+}
+.menu {
+  padding: 4px 9px;
+  position: relative;
+}
+.menu:hover, .menu.open { background: #C1D2EE; outline: 1px solid #316AC5; }
+.dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 230px;
+  background: #F6F6F6;
+  border: 1px solid #979797;
+  box-shadow: 3px 3px 6px rgba(0,0,0,.25);
+  padding: 2px;
+  z-index: 100;
+}
+.menu.open .dropdown { display: block; }
+.mi {
+  padding: 4px 24px 4px 26px;
+  position: relative;
+  white-space: nowrap;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+.mi:hover { background: #316AC5; color: #fff; }
+.mi .key { color: #888; font-size: 12px; }
+.mi:hover .key { color: #dbe6ff; }
+.mi.check.checked::before {
+  content: "\2713";
+  position: absolute;
+  left: 8px;
+}
+.sep { border-top: 1px solid #D9D9D9; margin: 3px 8px; }
+
+/* ===== Toolbar ===== */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: linear-gradient(#FBFAF4, #ECE9D8);
+  border-bottom: 1px solid #D4D0C8;
+  padding: 2px 4px;
+  flex: 0 0 auto;
+}
+.tb {
+  width: 26px;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 2px;
+  padding: 3px;
+  cursor: default;
+}
+.tb svg { width: 100%; height: 100%; display: block; }
+.tb:hover { border-color: #316AC5; background: #DDE8F7; }
+.tb:active { background: #C1D2EE; }
+.tb.toggle.on { border-color: #316AC5; background: #C1D2EE; }
+.tbsep {
+  width: 1px;
+  height: 20px;
+  background: #C9C5B8;
+  margin: 0 4px;
+}
+
+/* ===== Tab bar ===== */
+#tabbar {
+  display: flex;
+  align-items: flex-end;
+  background: #DEDBCE;
+  border-bottom: 1px solid #999;
+  padding: 3px 4px 0;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+#tabbar::-webkit-scrollbar { height: 4px; }
+#tabbar::-webkit-scrollbar-thumb { background: #B5B1A4; }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px 4px 9px;
+  background: linear-gradient(#F4F2E8, #DCD9CB);
+  border: 1px solid #999;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  margin-right: 2px;
+  white-space: nowrap;
+  position: relative;
+  flex: 0 0 auto;
+  color: #444;
+}
+.tab.active {
+  background: #FFFFFF;
+  color: #000;
+  padding-top: 5px;
+  z-index: 2;
+}
+.tab.active::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: #FF8000;               /* Notepad++ active-tab accent */
+  border-radius: 4px 4px 0 0;
+}
+.tab .tabname { overflow: hidden; text-overflow: ellipsis; }
+.tab .dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: #2F6EDE;               /* blue = saved, like NPP's floppy */
+  flex: 0 0 auto;
+}
+.tab.dirty .dot { background: #D53434; }  /* red = unsaved changes */
+.tab .close {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: #777;
+  padding: 0 2px;
+  border-radius: 2px;
+  cursor: default;
+}
+.tab .close:hover { background: #D53434; color: #fff; }
+
+/* ===== Editor ===== */
+#editor-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #fff;
+  cursor: text;
+}
+.CodeMirror {
+  height: 100%;
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.CodeMirror-gutters { background: #EDEDED; border-right: 1px solid #D0D0D0; }
+.CodeMirror-linenumber { color: #8A8A8A; }
+.CodeMirror-activeline-background { background: #E8E8FF; }  /* NPP current line */
+.CodeMirror-selected { background: rgba(117, 217, 117, .55) !important; } /* NPP green selection */
+.CodeMirror-focused .CodeMirror-selected { background: rgba(117, 217, 117, .55) !important; }
+.cm-searching { background: #FFB151; outline: 1px solid #E0862C; }
+.CodeMirror-matchingbracket { color: #C80000 !important; background: #F6F6C8; font-weight: bold; }
+
+/* ===== Find / Replace bar ===== */
+#findbar {
+  flex: 0 0 auto;
+  background: #F0EFE2;
+  border-top: 1px solid #C9C5B8;
+  padding: 5px 8px;
+}
+#findbar.hidden, .hidden { display: none !important; }
+.findrow { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.findrow label { min-width: 62px; text-align: right; }
+.findrow label.cb { min-width: 0; display: flex; align-items: center; gap: 3px; }
+.findrow input[type=text] {
+  flex: 0 1 320px;
+  padding: 3px 5px;
+  border: 1px solid #7F9DB9;
+  font-size: 13px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#find-input.notfound { background: #FFD8D8; }
+.findrow button {
+  padding: 3px 10px;
+  background: linear-gradient(#fff, #E3E1D5);
+  border: 1px solid #999;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.findrow button:hover { border-color: #316AC5; }
+.findrow button:active { background: #C1D2EE; }
+#find-count { color: #666; font-size: 12px; }
+.closebtn { margin-left: auto; }
+
+/* ===== Status bar ===== */
+#statusbar {
+  display: flex;
+  flex: 0 0 auto;
+  background: #ECE9D8;
+  border-top: 1px solid #C9C5B8;
+  font-size: 12px;
+  color: #333;
+}
+#statusbar span {
+  padding: 3px 10px;
+  border-right: 1px solid #C9C5B8;
+  white-space: pre;
+}
+#statusbar .grow { flex: 1 1 auto; }
+
+/* ===== Modal ===== */
+#modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.25);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+  z-index: 200;
+}
+#modal {
+  background: #F0EFE2;
+  border: 1px solid #666;
+  box-shadow: 4px 4px 12px rgba(0,0,0,.35);
+  min-width: 320px;
+  max-width: 460px;
+}
+#modal-title {
+  background: linear-gradient(#4A79D9, #28457F);
+  color: #fff;
+  padding: 4px 10px;
+  font-weight: 600;
+}
+#modal-body { padding: 14px; user-select: text; -webkit-user-select: text; }
+#modal-body input {
+  width: 100%;
+  padding: 4px;
+  border: 1px solid #7F9DB9;
+  font-size: 13px;
+  margin-top: 8px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#modal-buttons { padding: 8px 14px 12px; text-align: right; }
+#modal-buttons button {
+  padding: 4px 16px;
+  margin-left: 8px;
+  background: linear-gradient(#fff, #E3E1D5);
+  border: 1px solid #999;
+  border-radius: 3px;
+}
+#modal-buttons button:hover { border-color: #316AC5; }
