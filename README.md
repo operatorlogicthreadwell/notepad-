@@ -2,18 +2,19 @@
 
 **Notepad++ for the Mac** — an HTML interface wrapped in Python.
 
-Ships as **two editions from one codebase** (`./build_app.sh` builds both):
+Ships as **three editions from one codebase** (`./build_app.sh` builds all):
 
-| | Notepad-- (classic) | Notepad-- AI |
-|---|---|---|
-| Entry point | `python3 app.py --classic` / `app_classic.py` | `python3 app.py` |
-| Tabs, syntax, find/replace, session restore, Run console | ✅ | ✅ |
-| PDF viewing + annotation | — | ✅ |
-| Apple Notes integration | — | ✅ |
-| Decide panel (Claude-powered decision briefs) | — | ✅ |
+| | Notepad-- (classic) | Notepad-- Plus | Notepad-- AI |
+|---|---|---|---|
+| Entry point | `python3 app.py --classic` | `python3 app.py --plus` | `python3 app.py` |
+| Tabs, syntax, find/replace, session restore, Run console | ✅ | ✅ | ✅ |
+| PDF viewing + annotation | — | ✅ | ✅ |
+| Apple Notes integration | — | ✅ | ✅ |
+| Decide panel (Claude-powered decision briefs) | — | — | ✅ |
 
-Classic stays true to Notepad++; AI is the evolved edition. Each keeps its
-own session, so tabs never leak between them.
+Classic stays true to Notepad++; Plus is everything we've built minus the
+AI; AI is the fully evolved edition. Each keeps its own session, so tabs
+never leak between them.
 
 A lightweight, classic-Notepad++-style text editor. The UI is HTML/CSS/JS
 (with [CodeMirror](https://codemirror.net/5/) for editing) rendered inside a

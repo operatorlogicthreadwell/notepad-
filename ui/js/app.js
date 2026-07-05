@@ -235,11 +235,12 @@
   // ======================================================================
   const tabs = [];        // {id, path, name, doc, cleanGen, lang, encoding, eol, scroll}
   let activeTab = null;
-  let edition = "ai";     // "classic" (true to Notepad++) or "ai" (evolved)
+  let edition = "ai";     // "classic" | "plus" (no AI) | "ai" (everything)
   const isClassic = () => edition === "classic";
-  // Commands that belong to the AI-evolved edition only
-  const AI_COMMANDS = ["aiAnalyze", "aiAsk", "aiSettings", "toggleInsight",
-                       "openNote", "sendToNotes", "pdfToText"];
+  const hasAI = () => edition === "ai";
+  // Decide panel: AI edition only. Evolved extras (PDF/Notes): plus and AI.
+  const DECIDE_COMMANDS = ["aiAnalyze", "aiAsk", "aiSettings", "toggleInsight"];
+  const EVOLVED_COMMANDS = ["openNote", "sendToNotes", "pdfToText"];
   let untitledCounter = 0;
   let cm = null;
   const settings = { wrap: false, lineNumbers: true, fontSize: 13,
@@ -1880,7 +1881,8 @@
   }
 
   function runCommand(cmd) {
-    if (isClassic() && AI_COMMANDS.includes(cmd)) return;
+    if (!hasAI() && DECIDE_COMMANDS.includes(cmd)) return;
+    if (isClassic() && EVOLVED_COMMANDS.includes(cmd)) return;
     const isPdf = activeTab && activeTab.type === "pdf";
     if (isPdf) {
       // Editor-only commands are no-ops on a read-only PDF tab
@@ -2003,6 +2005,7 @@
     await backend.init();
     edition = await backend.getEdition();
     if (isClassic()) document.body.classList.add("classic");
+    if (!hasAI()) document.body.classList.add("no-ai");
     await restoreSession();
     // Files the app was launched with (Finder "Open With", CLI args)
     for (const p of await backend.startupFiles()) await openPath(p);

@@ -72,10 +72,12 @@ PY
 }
 
 build_one "Notepad--" "app_classic.py" "no"
+build_one "Notepad-- Plus" "app_plus.py" "yes"
 build_one "Notepad-- AI" "app.py" "yes"
 
 echo
-echo "Done! Two apps in dist/:"
-echo "  Notepad--.app      - classic, true to Notepad++"
-echo "  Notepad-- AI.app   - PDF annotation, Apple Notes, Decide panel"
-echo "Drag either (or both) into /Applications."
+echo "Done! Three apps in dist/:"
+echo "  Notepad--.app       - classic, true to Notepad++"
+echo "  Notepad-- Plus.app  - + PDF annotation and Apple Notes (no AI)"
+echo "  Notepad-- AI.app    - everything, including the Decide panel"
+echo "Drag any (or all) into /Applications."
