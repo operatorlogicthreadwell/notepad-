@@ -10,7 +10,9 @@ Build .app:     ./build_app.sh
 import base64
 import json
 import os
+import subprocess
 import sys
+import threading
 
 import webview
 
@@ -41,11 +43,19 @@ def data_dir():
 SESSION_FILE = os.path.join(data_dir(), "session.json")
 
 
+# Files handed to us at launch (Finder "Open With" via argv-emulation, or CLI)
+STARTUP_FILES = [a for a in sys.argv[1:] if not a.startswith("-") and os.path.isfile(a)]
+
+
 class Api:
     """Methods callable from JavaScript via window.pywebview.api.*"""
 
     def __init__(self):
         self.window = None
+        self._proc = None
+
+    def get_startup_files(self):
+        return STARTUP_FILES
 
     # ---- dialogs -------------------------------------------------------
     def open_dialog(self):
@@ -152,6 +162,79 @@ class Api:
         except OSError as exc:
             return {"error": str(exc)}
 
+    # ---- running scripts (Notepad++ "Run" menu) --------------------------
+    def _emit_js(self, script):
+        try:
+            self.window.evaluate_js(script)
+        except Exception:
+            pass
+
+    def _emit_output(self, stream, text):
+        self._emit_js("window.__runOutput && window.__runOutput(%s, %s)"
+                      % (json.dumps(text), json.dumps(stream)))
+
+    def run_file(self, path, lang):
+        ext = os.path.splitext(path)[1].lower()
+        if lang == "python" or ext in (".py", ".pyw"):
+            argv = ["python3", path]
+        elif lang == "shell" or ext in (".sh", ".bash", ".zsh", ".command"):
+            argv = ["bash", path]
+        else:
+            return {"error": "Don't know how to run %s files — use Run Shell Command instead."
+                             % (ext or "these")}
+        self._emit_output("cmd", "$ %s\n" % " ".join(argv))
+        return self._spawn(argv, shell=False, cwd=os.path.dirname(path))
+
+    def run_command(self, cmd, cwd=None):
+        self._emit_output("cmd", "$ %s\n" % cmd)
+        return self._spawn(cmd, shell=True, cwd=cwd)
+
+    def run_stop(self):
+        proc = self._proc
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return {"ok": True}
+        return {"ok": False}
+
+    def _spawn(self, cmd, shell, cwd):
+        if self._proc and self._proc.poll() is None:
+            return {"error": "A process is already running — stop it first.\n"}
+        env = os.environ.copy()
+        # GUI apps on macOS get a minimal PATH; add the usual tool locations
+        env["PATH"] = ":".join([env.get("PATH", "/usr/bin:/bin"),
+                                "/usr/local/bin", "/opt/homebrew/bin"])
+        try:
+            self._proc = subprocess.Popen(
+                cmd, shell=shell, cwd=cwd or None, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL, text=True, errors="replace", bufsize=1)
+        except OSError as exc:
+            return {"error": str(exc) + "\n"}
+        proc = self._proc
+
+        def pump(pipe, name):
+            for line in iter(pipe.readline, ""):
+                self._emit_output(name, line)
+            pipe.close()
+
+        pumps = [threading.Thread(target=pump, args=(proc.stdout, "out"), daemon=True),
+                 threading.Thread(target=pump, args=(proc.stderr, "err"), daemon=True)]
+        for t in pumps:
+            t.start()
+
+        def wait():
+            code = proc.wait()
+            for t in pumps:          # let the last output lines land first
+                t.join(timeout=3)
+            self._emit_js("window.__runDone && window.__runDone(%d)" % code)
+
+        threading.Thread(target=wait, daemon=True).start()
+        return {"ok": True}
+
     # ---- window --------------------------------------------------------
     def set_title(self, title):
         try:
@@ -174,19 +257,10 @@ def main():
     )
     api.window = window
 
-    def on_closing():
-        # Grab the live session from the page and persist it synchronously,
-        # so unsaved tabs survive even an abrupt quit.
-        try:
-            raw = window.evaluate_js(
-                "window.__getSessionJSON ? window.__getSessionJSON() : null"
-            )
-            if raw:
-                api._write_session(json.loads(raw))
-        except Exception:
-            pass  # debounced saves already wrote a recent copy
-
-    window.events.closing += on_closing
+    # NOTE: do not call window.evaluate_js from the `closing` event — on macOS
+    # it deadlocks the main thread and the app hangs on quit. The UI persists
+    # the session continuously (debounced saves plus pagehide/visibility
+    # flushes), so there is nothing to do here at close time.
     webview.start(debug="--debug" in sys.argv)
 
 

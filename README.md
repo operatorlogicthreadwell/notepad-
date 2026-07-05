@@ -29,6 +29,13 @@ the system WKWebView — so there's no bundled browser and the app stays small.
   Save / Don't Save / Cancel; saving warns if another program changed the
   file on disk since you opened it; files keep their original encoding
   (UTF-8, UTF-8-BOM, ANSI) instead of being silently re-encoded
+- **Run scripts** — ⌘R runs the current Python or shell file (saving it
+  first if needed) with live stdout/stderr streaming into a console panel;
+  ⇧⌘R runs any one-off shell command in the file's directory, with command
+  history, a Stop button, and exit-code status — like Notepad++'s Run menu
+- **Opens from Finder** — the built app registers itself for text, code,
+  and PDF files, so right-click → *Open With* → **Notepad--** works, and
+  double-clicked files open in the editor at launch
 - **PDF viewing** — open a `.pdf` and it renders in a read-only tab
   ([PDF.js](https://mozilla.github.io/pdf.js/), vendored, works offline):
   page navigation, zoom/fit-width, ⌘L go-to-page, text selection, and ⌘F

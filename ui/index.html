@@ -60,6 +60,15 @@
   <div class="menu" data-menu="language">Language
     <div class="dropdown" id="language-menu"><!-- filled by JS --></div>
   </div>
+  <div class="menu" data-menu="run">Run
+    <div class="dropdown">
+      <div class="mi" data-cmd="runFile">Run File<span class="key">&#8984;R</span></div>
+      <div class="mi" data-cmd="runShellCommand">Run Shell Command&hellip;<span class="key">&#8679;&#8984;R</span></div>
+      <div class="mi" data-cmd="runStop">Stop Running Process</div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="toggleConsole">Show/Hide Console</div>
+    </div>
+  </div>
   <div class="menu" data-menu="help">?
     <div class="dropdown">
       <div class="mi" data-cmd="about">About Notepad--</div>
@@ -129,6 +138,20 @@
     <button id="btn-replace">Replace</button>
     <button id="btn-replace-all">Replace All</button>
   </div>
+</div>
+
+<!-- ===== Run console ===== -->
+<div id="console" class="hidden">
+  <div id="console-bar">
+    <span id="console-title">Console</span>
+    <span id="console-status"></span>
+    <input id="console-cmd" type="text" spellcheck="false"
+           placeholder="shell command — Enter to run (&#8679;&#8984;R)">
+    <button id="console-stop" title="Stop the running process">Stop</button>
+    <button id="console-clear" title="Clear output">Clear</button>
+    <button id="console-close" class="closebtn" title="Hide console">&#10005;</button>
+  </div>
+  <pre id="console-out"></pre>
 </div>
 
 <!-- ===== Status bar ===== -->

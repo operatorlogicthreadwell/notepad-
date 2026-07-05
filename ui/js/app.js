@@ -101,6 +101,24 @@
       document.title = t;
       if (!this.isShim && this.api) this.api.set_title(t).catch?.(() => {});
     },
+
+    async runFile(path, lang) {
+      if (this.isShim) return { error: "Running scripts needs the desktop app (python3 app.py).\n" };
+      return this.api.run_file(path, lang);
+    },
+    async runCommand(cmd, cwd) {
+      if (this.isShim) return { error: "Running commands needs the desktop app (python3 app.py).\n" };
+      return this.api.run_command(cmd, cwd);
+    },
+    async runStop() {
+      if (this.isShim) return { ok: false };
+      return this.api.run_stop();
+    },
+    async startupFiles() {
+      if (this.isShim || !this.api.get_startup_files) return [];
+      try { return (await this.api.get_startup_files()) || []; }
+      catch (e) { return []; }
+    },
   };
 
   // ======================================================================
@@ -737,12 +755,17 @@
     };
   }
 
-  // Called synchronously by Python right before the window closes.
-  window.__getSessionJSON = () => {
-    try { return JSON.stringify(buildSession()); }
-    catch (e) { return null; }
-  };
-  window.addEventListener("beforeunload", () => backend.saveSession(buildSession()));
+  // Flush the session whenever the window loses foreground or starts closing,
+  // so at most a fraction of a second of typing is ever at risk.
+  function flushSession() {
+    try { backend.saveSession(buildSession()); } catch (e) { /* mid-boot */ }
+  }
+  window.addEventListener("beforeunload", flushSession);
+  window.addEventListener("pagehide", flushSession);
+  window.addEventListener("blur", flushSession);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSession();
+  });
 
   async function restoreSession() {
     const s = await backend.loadSession();
@@ -975,6 +998,101 @@
   }
 
   // ======================================================================
+  // Run console
+  // ======================================================================
+  const consoleEl = document.getElementById("console");
+  const consoleOut = document.getElementById("console-out");
+  const consoleStatus = document.getElementById("console-status");
+  const consoleCmd = document.getElementById("console-cmd");
+  let running = false;
+  const cmdHistory = [];
+  let cmdHistoryIdx = -1;
+
+  function showConsole(show) {
+    consoleEl.classList.toggle("hidden", !show);
+    cm.refresh();
+  }
+
+  function setRunStatus(text, cls) {
+    consoleStatus.textContent = text;
+    consoleStatus.className = cls || "";
+  }
+
+  function appendConsole(text, cls) {
+    const nearBottom = consoleOut.scrollHeight - consoleOut.scrollTop - consoleOut.clientHeight < 40;
+    const span = document.createElement("span");
+    span.className = "con-" + (cls || "out");
+    span.textContent = text;
+    consoleOut.appendChild(span);
+    while (consoleOut.childNodes.length > 5000) consoleOut.removeChild(consoleOut.firstChild);
+    if (nearBottom) consoleOut.scrollTop = consoleOut.scrollHeight;
+  }
+
+  window.__runOutput = (text, stream) => appendConsole(text, stream);
+  window.__runDone = (code) => {
+    running = false;
+    setRunStatus(code === 0 ? "finished (exit 0)" : "failed (exit " + code + ")",
+                 code === 0 ? "ok" : "fail");
+  };
+
+  async function startRun(promise) {
+    showConsole(true);
+    setRunStatus("running…", "run");
+    running = true;
+    const res = await promise;
+    if (res && res.error) {
+      appendConsole(res.error, "err");
+      running = false;
+      setRunStatus("failed", "fail");
+    }
+  }
+
+  async function runActiveFile() {
+    const tab = activeTab;
+    if (!tab || tab.type === "pdf") {
+      showAlert("Run", "Switch to a text tab to run it.");
+      return;
+    }
+    if (!tab.path || isDirty(tab)) {
+      if (!(await saveTab(tab))) return;   // must be on disk to run
+    }
+    await startRun(backend.runFile(tab.path, tab.lang.id));
+  }
+
+  function runShellCommandUI() {
+    showConsole(true);
+    consoleCmd.focus();
+  }
+
+  function setupConsole() {
+    consoleCmd.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        if (!cmdHistory.length) return;
+        e.preventDefault();
+        cmdHistoryIdx = e.key === "ArrowUp"
+          ? Math.max(0, cmdHistoryIdx === -1 ? cmdHistory.length - 1 : cmdHistoryIdx - 1)
+          : Math.min(cmdHistory.length - 1, cmdHistoryIdx + 1);
+        consoleCmd.value = cmdHistory[cmdHistoryIdx];
+        return;
+      }
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const cmd = consoleCmd.value.trim();
+      if (!cmd) return;
+      cmdHistory.push(cmd);
+      if (cmdHistory.length > 50) cmdHistory.shift();
+      cmdHistoryIdx = -1;
+      consoleCmd.value = "";
+      const cwd = activeTab && activeTab.path
+        ? activeTab.path.replace(/\/[^/]*$/, "") : null;
+      startRun(backend.runCommand(cmd, cwd));
+    });
+    document.getElementById("console-stop").addEventListener("click", () => backend.runStop());
+    document.getElementById("console-clear").addEventListener("click", () => { consoleOut.textContent = ""; });
+    document.getElementById("console-close").addEventListener("click", () => showConsole(false));
+  }
+
+  // ======================================================================
   // Menus
   // ======================================================================
   function buildLanguageMenu() {
@@ -1197,6 +1315,10 @@
       zoomOut: () => { settings.fontSize = Math.max(settings.fontSize - 1, 8); applyFontSize(); scheduleSessionSave(); },
       zoomReset: () => { settings.fontSize = 13; applyFontSize(); scheduleSessionSave(); },
       pdfToText,
+      runFile: runActiveFile,
+      runShellCommand: runShellCommandUI,
+      runStop: () => backend.runStop(),
+      toggleConsole: () => showConsole(consoleEl.classList.contains("hidden")),
       about: aboutDialog,
     };
     const fn = actions[cmd];
@@ -1220,6 +1342,7 @@
       let cmd = null;
       if (k === "s") cmd = e.shiftKey ? "saveAs" : "save";
       else if (k === "f") cmd = e.altKey ? "replace" : "find";
+      else if (k === "r") cmd = e.shiftKey ? "runShellCommand" : "runFile";
       else if (map[k] && !(k === "n" && e.shiftKey)) cmd = map[k];
       if (cmd) { e.preventDefault(); runCommand(cmd); }
     });
@@ -1249,8 +1372,11 @@
     setupMenubar();
     setupShortcuts();
     setupPdfToolbar();
+    setupConsole();
     await backend.init();
     await restoreSession();
+    // Files the app was launched with (Finder "Open With", CLI args)
+    for (const p of await backend.startupFiles()) await openPath(p);
     cm.setOption("lineWrapping", settings.wrap);
     cm.setOption("lineNumbers", settings.lineNumbers);
     applyFontSize();
