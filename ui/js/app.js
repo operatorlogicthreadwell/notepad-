@@ -120,6 +120,61 @@
       catch (e) { return []; }
     },
 
+    async writeFileB64(path, b64) {
+      if (!this.isShim) return this.api.write_file_b64(path, b64);
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([arr], { type: "application/pdf" }));
+      a.download = path.split("/").pop();
+      a.click();
+      return { ok: true };
+    },
+
+    // PDF annotations — sidecar storage keyed by file path
+    async annosLoad(key) {
+      if (!this.isShim) return this.api.annotations_get(key);
+      try { return { data: JSON.parse(localStorage.getItem("npp-annos") || "{}")[key] || null }; }
+      catch (e) { return { data: null }; }
+    },
+    async annosSave(key, data) {
+      if (!this.isShim) return this.api.annotations_save(key, data);
+      const all = JSON.parse(localStorage.getItem("npp-annos") || "{}");
+      if (data && (data.highlights.length || data.notes.length)) all[key] = data;
+      else delete all[key];
+      localStorage.setItem("npp-annos", JSON.stringify(all));
+      return { ok: true };
+    },
+
+    // Decision intelligence — Claude API on the Mac, canned demo in the browser
+    async aiConfig() {
+      if (!this.isShim) return this.api.get_ai_config();
+      return { has_key: true, key_source: "demo", model: "claude-opus-4-8" };
+    },
+    async aiSetConfig(key, model) {
+      if (!this.isShim) return this.api.set_ai_config(key, model);
+      return { has_key: true, key_source: "demo", model: model || "claude-opus-4-8" };
+    },
+    async aiAnalyze(text, question) {
+      if (!this.isShim) return this.api.ai_analyze(text, question || null);
+      const demo = question
+        ? "**Demo answer** (the desktop app calls the real Claude API here).\n\nYour question was: " + question
+        : "## Summary\nDemo mode — the desktop app streams a real Claude analysis here.\n\n## Next actions\n- Run `python3 app.py` on your Mac\n- Add your API key under Decide → Claude API Settings";
+      let i = 0;
+      const tick = () => {
+        if (i < demo.length) {
+          window.__aiOutput && window.__aiOutput(demo.slice(i, i + 12));
+          i += 12;
+          setTimeout(tick, 15);
+        } else {
+          window.__aiDone && window.__aiDone(null);
+        }
+      };
+      setTimeout(tick, 100);
+      return { ok: true };
+    },
+
     // Apple Notes — demo data in the browser, osascript on the Mac
     _shimNotes: [
       { id: "demo-1", name: "Groceries", folder: "Notes", content: "Groceries\nmilk\neggs\ncoffee" },
@@ -174,7 +229,8 @@
   let activeTab = null;
   let untitledCounter = 0;
   let cm = null;
-  const settings = { wrap: false, lineNumbers: true, fontSize: 13 };
+  const settings = { wrap: false, lineNumbers: true, fontSize: 13,
+                     consoleH: 190, consoleW: 420, consoleDock: "bottom" };
 
   const $ = (sel) => document.querySelector(sel);
   const tabbar = $("#tabbar");
@@ -515,6 +571,7 @@
       eol: "\n",
     };
     tabs.push(tab);
+    await loadAnnotations(tab);
     renderTabs();
     if (opts.activate !== false) {
       activateTab(tab);
@@ -585,6 +642,7 @@
     }).promise;
     tab.pageDivs[n] = divs;
     applyPdfHighlights(tab, n);
+    drawAnnotations(tab, n);
   }
 
   function updatePdfToolbar(tab) {
@@ -739,6 +797,188 @@
     updateStatus();
   }
 
+  // ---- PDF annotations: highlights + note pins, sidecar-persisted --------
+  let pdfMode = null;   // null | 'highlight' | 'note'
+  let annoSeq = 1;
+
+  function annoKey(tab) {
+    return tab.path || ("name:" + tab.name);
+  }
+
+  async function loadAnnotations(tab) {
+    const res = await backend.annosLoad(annoKey(tab));
+    tab.annos = (res && res.data) || { highlights: [], notes: [] };
+  }
+
+  function saveAnnotations(tab) {
+    backend.annosSave(annoKey(tab), tab.annos);
+  }
+
+  function setPdfMode(mode) {
+    pdfMode = pdfMode === mode ? null : mode;
+    document.getElementById("pdf-mode-highlight").classList.toggle("on", pdfMode === "highlight");
+    document.getElementById("pdf-mode-note").classList.toggle("on", pdfMode === "note");
+    pdfPagesEl.classList.toggle("mode-note", pdfMode === "note");
+  }
+
+  function drawAnnotations(tab, n) {
+    const ph = pdfPagesEl.querySelector('.pdf-page[data-page="' + n + '"]');
+    if (!ph || !tab.annos) return;
+    let layer = ph.querySelector(".anno-layer");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "anno-layer";
+      ph.appendChild(layer);
+    }
+    layer.textContent = "";
+    const z = tab.zoom;
+    for (const h of tab.annos.highlights) {
+      if (h.page !== n) continue;
+      for (const r of h.rects) {
+        const el = document.createElement("div");
+        el.className = "anno-hl";
+        el.style.left = r.x * z + "px";
+        el.style.top = r.y * z + "px";
+        el.style.width = r.w * z + "px";
+        el.style.height = r.h * z + "px";
+        el.title = "Highlight — click to remove";
+        el.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const choice = await showConfirm("Remove highlight", "Remove this highlight?",
+            [{ label: "Remove", value: "yes" }, { label: "Cancel", value: "no" }], "no");
+          if (choice === "yes") {
+            tab.annos.highlights = tab.annos.highlights.filter((x) => x.id !== h.id);
+            saveAnnotations(tab);
+            drawAnnotations(tab, n);
+          }
+        });
+        layer.appendChild(el);
+      }
+    }
+    for (const note of tab.annos.notes) {
+      if (note.page !== n) continue;
+      const pin = document.createElement("div");
+      pin.className = "anno-pin";
+      pin.textContent = "✎";
+      pin.style.left = note.x * z + "px";
+      pin.style.top = note.y * z + "px";
+      pin.title = note.text || "Note";
+      pin.addEventListener("click", (e) => { e.stopPropagation(); editNote(tab, note, n); });
+      layer.appendChild(pin);
+    }
+  }
+
+  function editNote(tab, note, page) {
+    showModal("Note", '<textarea id="note-text" rows="5" style="width:100%;box-sizing:border-box;' +
+      'user-select:text;-webkit-user-select:text;font-size:13px;padding:4px;' +
+      'border:1px solid #7F9DB9"></textarea>',
+      [
+        { label: "Save", onClick: () => {
+            note.text = document.getElementById("note-text") ? document.getElementById("note-text").value : note.text;
+            if (!tab.annos.notes.includes(note)) tab.annos.notes.push(note);
+            saveAnnotations(tab);
+            drawAnnotations(tab, page);
+          } },
+        { label: "Delete", onClick: () => {
+            tab.annos.notes = tab.annos.notes.filter((x) => x.id !== note.id);
+            saveAnnotations(tab);
+            drawAnnotations(tab, page);
+          } },
+        { label: "Cancel" },
+      ]);
+    const ta = document.getElementById("note-text");
+    if (ta) { ta.value = note.text || ""; ta.focus(); }
+  }
+
+  function highlightFromSelection(tab) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const startPage = range.startContainer.parentElement
+      && range.startContainer.parentElement.closest(".pdf-page");
+    if (!startPage) return;
+    const n = +startPage.dataset.page;
+    const pageRect = startPage.getBoundingClientRect();
+    const z = tab.zoom;
+    const rects = [];
+    for (const r of range.getClientRects()) {
+      if (r.width < 2 || r.height < 2) continue;
+      // keep only the parts on the starting page, in scale-1 page coordinates
+      if (r.bottom < pageRect.top || r.top > pageRect.bottom) continue;
+      rects.push({
+        x: (r.left - pageRect.left) / z,
+        y: (r.top - pageRect.top) / z,
+        w: r.width / z,
+        h: r.height / z,
+      });
+    }
+    if (!rects.length) return;
+    tab.annos.highlights.push({ id: "h" + Date.now() + "-" + annoSeq++, page: n, rects });
+    sel.removeAllRanges();
+    saveAnnotations(tab);
+    drawAnnotations(tab, n);
+  }
+
+  async function exportAnnotatedPdf() {
+    const tab = activeTab;
+    if (!tab || tab.type !== "pdf") return;
+    if (!tab.annos || (!tab.annos.highlights.length && !tab.annos.notes.length)) {
+      showAlert("Export Annotated", "No annotations yet — use Highlight or Note first.");
+      return;
+    }
+    setRunStatusSafe("exporting…");
+    try {
+      const bytes = await tab.doc.getData();               // original PDF bytes
+      const pdfDoc = await PDFLib.PDFDocument.load(bytes);
+      const pages = pdfDoc.getPages();
+      const yellow = PDFLib.rgb(1, 0.86, 0.24);
+      const brown = PDFLib.rgb(0.45, 0.29, 0);
+      for (const h of tab.annos.highlights) {
+        const page = pages[h.page - 1];
+        if (!page) continue;
+        const H = page.getHeight();
+        for (const r of h.rects) {
+          page.drawRectangle({ x: r.x, y: H - r.y - r.h, width: r.w, height: r.h,
+                               color: yellow, opacity: 0.35 });
+        }
+      }
+      for (const note of tab.annos.notes) {
+        const page = pages[note.page - 1];
+        if (!page) continue;
+        const H = page.getHeight();
+        page.drawCircle({ x: note.x, y: H - note.y, size: 7, color: yellow,
+                          borderColor: brown, borderWidth: 1 });
+        if (note.text) {
+          page.drawText(note.text, { x: note.x + 12, y: H - note.y - 3, size: 9,
+                                     maxWidth: 220, lineHeight: 11, color: brown });
+        }
+      }
+      const out = await pdfDoc.save();
+      window.__lastExportSize = out.length;                // test hook
+      let b64 = "";
+      const CHUNK = 0x8000;
+      for (let i = 0; i < out.length; i += CHUNK) {
+        b64 += String.fromCharCode.apply(null, out.subarray(i, i + CHUNK));
+      }
+      b64 = btoa(b64);
+      const suggested = tab.name.replace(/\.pdf$/i, "") + "-annotated.pdf";
+      const path = await backend.saveDialog(suggested,
+        tab.path ? tab.path.replace(/\/[^/]*$/, "") : "");
+      if (!path) return;
+      const res = await backend.writeFileB64(path, b64);
+      if (res.error) showAlert("Export failed", res.error);
+    } catch (e) {
+      showAlert("Export failed", e.message || String(e));
+    } finally {
+      setRunStatusSafe("");
+    }
+  }
+
+  function setRunStatusSafe(text) {
+    const el = document.getElementById("pdf-readonly");
+    if (el) el.textContent = text || "read-only";
+  }
+
   function setupPdfToolbar() {
     const tab = () => (activeTab && activeTab.type === "pdf" ? activeTab : null);
     document.getElementById("pdf-prev").addEventListener("click", () => { const t = tab(); if (t) gotoPdfPage(t, t.page - 1); });
@@ -747,6 +987,28 @@
     document.getElementById("pdf-zoom-out").addEventListener("click", () => { const t = tab(); if (t) setPdfZoom(t, t.zoom / 1.2); });
     document.getElementById("pdf-zoom-fit").addEventListener("click", () => { const t = tab(); if (t) setPdfZoom(t, null); });
     document.getElementById("pdf-extract").addEventListener("click", pdfToText);
+    document.getElementById("pdf-mode-highlight").addEventListener("click", () => setPdfMode("highlight"));
+    document.getElementById("pdf-mode-note").addEventListener("click", () => setPdfMode("note"));
+    document.getElementById("pdf-export").addEventListener("click", exportAnnotatedPdf);
+    pdfPagesEl.addEventListener("mouseup", () => {
+      const t = tab();
+      if (t && pdfMode === "highlight") setTimeout(() => highlightFromSelection(t), 10);
+    });
+    pdfPagesEl.addEventListener("click", (e) => {
+      const t = tab();
+      if (!t || pdfMode !== "note") return;
+      const ph = e.target.closest(".pdf-page");
+      if (!ph) return;
+      const rect = ph.getBoundingClientRect();
+      const note = {
+        id: "n" + Date.now() + "-" + annoSeq++,
+        page: +ph.dataset.page,
+        x: (e.clientX - rect.left) / t.zoom,
+        y: (e.clientY - rect.top) / t.zoom,
+        text: "",
+      };
+      editNote(t, note, note.page);
+    });
     document.getElementById("pdf-page-input").addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault();
@@ -1149,8 +1411,25 @@
   const cmdHistory = [];
   let cmdHistoryIdx = -1;
 
+  function applyConsoleLayout() {
+    const right = settings.consoleDock === "right";
+    consoleEl.classList.toggle("dock-right", right);
+    if (right) {
+      consoleEl.style.height = "";
+      consoleEl.style.width = Math.max(240, settings.consoleW) + "px";
+      // right dock: console sits beside the editor column
+      document.getElementById("main-row").insertBefore(
+        consoleEl, document.getElementById("insight"));
+    } else {
+      consoleEl.style.width = "";
+      consoleEl.style.height = Math.max(90, settings.consoleH) + "px";
+      document.getElementById("main-col").appendChild(consoleEl);
+    }
+  }
+
   function showConsole(show) {
     consoleEl.classList.toggle("hidden", !show);
+    if (show) applyConsoleLayout();
     cm.refresh();
   }
 
@@ -1228,6 +1507,182 @@
     document.getElementById("console-stop").addEventListener("click", () => backend.runStop());
     document.getElementById("console-clear").addEventListener("click", () => { consoleOut.textContent = ""; });
     document.getElementById("console-close").addEventListener("click", () => showConsole(false));
+    document.getElementById("console-dock").addEventListener("click", () => {
+      settings.consoleDock = settings.consoleDock === "right" ? "bottom" : "right";
+      applyConsoleLayout();
+      cm.refresh();
+      scheduleSessionSave();
+    });
+
+    // Drag the console edge to resize (top edge when docked bottom, left when right)
+    const resizer = document.getElementById("console-resizer");
+    resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX, startY = e.clientY;
+      const startH = consoleEl.offsetHeight, startW = consoleEl.offsetWidth;
+      const move = (ev) => {
+        if (settings.consoleDock === "right") {
+          settings.consoleW = Math.min(Math.max(startW + (startX - ev.clientX), 240),
+                                       window.innerWidth - 300);
+          consoleEl.style.width = settings.consoleW + "px";
+        } else {
+          settings.consoleH = Math.min(Math.max(startH + (startY - ev.clientY), 90),
+                                       window.innerHeight - 200);
+          consoleEl.style.height = settings.consoleH + "px";
+        }
+      };
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        cm.refresh();
+        scheduleSessionSave();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  // ======================================================================
+  // Decide panel — decision intelligence via the Claude API
+  // ======================================================================
+  const insightEl = document.getElementById("insight");
+  const insightOut = document.getElementById("insight-out");
+  const insightStatus = document.getElementById("insight-status");
+  const insightQ = document.getElementById("insight-q");
+  let aiBuffer = "";
+  let aiRunning = false;
+
+  function showInsight(show) {
+    insightEl.classList.toggle("hidden", !show);
+    cm.refresh();
+  }
+
+  function setAiStatus(text, cls) {
+    insightStatus.textContent = text;
+    insightStatus.className = cls || "";
+  }
+
+  // Minimal markdown: headings, bold, bullets — enough for a decision brief
+  function renderMarkdown(md) {
+    const out = [];
+    let inList = false;
+    for (const rawLine of md.split("\n")) {
+      const line = escapeHtml(rawLine)
+        .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>");
+      const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+      if (bullet) {
+        if (!inList) { out.push("<ul>"); inList = true; }
+        out.push("<li>" + bullet[1] + "</li>");
+        continue;
+      }
+      if (inList) { out.push("</ul>"); inList = false; }
+      const h = line.match(/^(#{1,3})\s+(.*)$/);
+      if (h) {
+        const level = Math.max(2, h[1].length);   // '#'/'##' → h2, '###' → h3
+        out.push("<h" + level + ">" + h[2] + "</h" + level + ">");
+      } else if (line.trim()) out.push("<p>" + line + "</p>");
+    }
+    if (inList) out.push("</ul>");
+    return out.join("");
+  }
+
+  window.__aiOutput = (chunk) => {
+    aiBuffer += chunk;
+    // stream as plain text; render markdown once complete
+    let pre = insightOut.querySelector("pre");
+    if (!pre) {
+      insightOut.textContent = "";
+      pre = document.createElement("pre");
+      insightOut.appendChild(pre);
+    }
+    pre.textContent = aiBuffer;
+    insightOut.scrollTop = insightOut.scrollHeight;
+  };
+
+  window.__aiDone = (error) => {
+    aiRunning = false;
+    if (error) {
+      setAiStatus("failed", "fail");
+      insightOut.innerHTML = '<div class="insight-empty">' + escapeHtml(error) + "</div>";
+      return;
+    }
+    setAiStatus("done", "");
+    insightOut.innerHTML = renderMarkdown(aiBuffer);
+  };
+
+  async function activeDocumentText() {
+    const tab = activeTab;
+    if (!tab) return null;
+    if (tab.type === "pdf") {
+      const texts = await ensurePdfTexts(tab);
+      return texts.map((p) => p.text.trimEnd()).join("\n\n");
+    }
+    return tab.doc.getValue();
+  }
+
+  async function runAnalysis(question) {
+    if (aiRunning) { setAiStatus("already running…", "run"); return; }
+    const text = await activeDocumentText();
+    if (!text || !text.trim()) {
+      showAlert("Decide", "The current tab is empty — open or write a document first.");
+      return;
+    }
+    const MAX_CHARS = 600000;   // keep well inside the context window
+    const clipped = text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) : text;
+    showInsight(true);
+    aiBuffer = "";
+    aiRunning = true;
+    insightOut.innerHTML = "";
+    setAiStatus("thinking…", "run");
+    const res = await backend.aiAnalyze(clipped, question || null);
+    if (res && res.error) {
+      aiRunning = false;
+      setAiStatus("failed", "fail");
+      insightOut.innerHTML = '<div class="insight-empty">' + escapeHtml(res.error) + "</div>";
+    } else if (text.length > MAX_CHARS) {
+      appendConsoleNote();
+    }
+  }
+
+  function appendConsoleNote() {
+    setAiStatus("analyzing (document truncated — it was very large)", "run");
+  }
+
+  async function aiSettingsDialog() {
+    const cfg = await backend.aiConfig();
+    const current = cfg.has_key
+      ? "A key is configured (from " + escapeHtml(cfg.key_source || "settings") + ")."
+      : "No key configured yet.";
+    showModal("Claude API Settings",
+      "<div>" + current + " Get a key at platform.claude.com.</div>" +
+      '<label style="display:block;margin-top:10px">API key' +
+      ' (leave blank to keep current):</label><input id="ai-key" type="password">' +
+      '<label style="display:block;margin-top:8px">Model:</label>' +
+      '<input id="ai-model" type="text">',
+      [{ label: "Save", onClick: async () => {
+          const key = document.getElementById("ai-key") ? document.getElementById("ai-key").value.trim() : "";
+          const model = document.getElementById("ai-model") ? document.getElementById("ai-model").value.trim() : "";
+          const res = await backend.aiSetConfig(key, model);
+          if (res.error) showAlert("Settings", res.error);
+        } },
+       { label: "Cancel" }]);
+    const modelInput = document.getElementById("ai-model");
+    if (modelInput) modelInput.value = cfg.model || "claude-opus-4-8";
+  }
+
+  function setupInsight() {
+    document.getElementById("insight-close").addEventListener("click", () => showInsight(false));
+    document.getElementById("insight-settings").addEventListener("click", aiSettingsDialog);
+    document.getElementById("insight-analyze").addEventListener("click", () => runAnalysis(null));
+    insightQ.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const q = insightQ.value.trim();
+      if (!q) return;
+      insightQ.value = "";
+      runAnalysis(q);
+    });
   }
 
   // ======================================================================
@@ -1459,6 +1914,10 @@
       runShellCommand: runShellCommandUI,
       runStop: () => backend.runStop(),
       toggleConsole: () => showConsole(consoleEl.classList.contains("hidden")),
+      aiAnalyze: () => runAnalysis(null),
+      aiAsk: () => { showInsight(true); insightQ.focus(); },
+      aiSettings: aiSettingsDialog,
+      toggleInsight: () => showInsight(insightEl.classList.contains("hidden")),
       about: aboutDialog,
     };
     const fn = actions[cmd];
@@ -1483,6 +1942,7 @@
       if (k === "s") cmd = e.shiftKey ? "saveAs" : "save";
       else if (k === "f") cmd = e.altKey ? "replace" : "find";
       else if (k === "r") cmd = e.shiftKey ? "runShellCommand" : "runFile";
+      else if (k === "a" && e.shiftKey) cmd = "aiAnalyze";
       else if (map[k] && !(k === "n" && e.shiftKey)) cmd = map[k];
       if (cmd) { e.preventDefault(); runCommand(cmd); }
     });
@@ -1513,6 +1973,7 @@
     setupShortcuts();
     setupPdfToolbar();
     setupConsole();
+    setupInsight();
     await backend.init();
     await restoreSession();
     // Files the app was launched with (Finder "Open With", CLI args)

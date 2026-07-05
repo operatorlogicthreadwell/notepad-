@@ -63,6 +63,15 @@
   <div class="menu" data-menu="language">Language
     <div class="dropdown" id="language-menu"><!-- filled by JS --></div>
   </div>
+  <div class="menu" data-menu="decide">Decide
+    <div class="dropdown">
+      <div class="mi" data-cmd="aiAnalyze">Analyze Document<span class="key">&#8679;&#8984;A</span></div>
+      <div class="mi" data-cmd="aiAsk">Ask About Document&hellip;</div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="aiSettings">Claude API Settings&hellip;</div>
+      <div class="mi" data-cmd="toggleInsight">Show/Hide Decide Panel</div>
+    </div>
+  </div>
   <div class="menu" data-menu="run">Run
     <div class="dropdown">
       <div class="mi" data-cmd="runFile">Run File<span class="key">&#8984;R</span></div>
@@ -102,6 +111,10 @@
 <!-- ===== Tab bar ===== -->
 <div id="tabbar"></div>
 
+<!-- ===== Main work area: editor/pdf column + dockable console + Decide panel ===== -->
+<div id="main-row">
+<div id="main-col">
+
 <!-- ===== Editor ===== -->
 <div id="editor-container"></div>
 
@@ -116,6 +129,10 @@
     <span id="pdf-zoom-label">100%</span>
     <button id="pdf-zoom-in" title="Zoom in (&#8984;+)">+</button>
     <button id="pdf-zoom-fit" title="Fit width (&#8984;0)">Fit</button>
+    <span class="pdfsep"></span>
+    <button id="pdf-mode-highlight" class="pdfmode" title="Highlight: select text on the page to mark it">&#128397; Highlight</button>
+    <button id="pdf-mode-note" class="pdfmode" title="Note: click anywhere on the page to attach a comment">&#128172; Note</button>
+    <button id="pdf-export" title="Save a copy of this PDF with your annotations drawn in">Export Annotated&hellip;</button>
     <span class="pdfsep"></span>
     <button id="pdf-extract" title="Extract all text into an editable tab">Open as Text</button>
     <span id="pdf-readonly">read-only</span>
@@ -145,6 +162,7 @@
 
 <!-- ===== Run console ===== -->
 <div id="console" class="hidden">
+  <div id="console-resizer" title="Drag to resize"></div>
   <div id="console-bar">
     <span id="console-title">Console</span>
     <span id="console-status"></span>
@@ -152,10 +170,35 @@
            placeholder="shell command — Enter to run (&#8679;&#8984;R)">
     <button id="console-stop" title="Stop the running process">Stop</button>
     <button id="console-clear" title="Clear output">Clear</button>
+    <button id="console-dock" title="Move console between bottom and right side">&#8646;</button>
     <button id="console-close" class="closebtn" title="Hide console">&#10005;</button>
   </div>
   <pre id="console-out"></pre>
 </div>
+
+</div><!-- /main-col -->
+
+<!-- ===== Decide panel (decision intelligence) ===== -->
+<div id="insight" class="hidden">
+  <div id="insight-bar">
+    <span id="insight-title">Decide</span>
+    <span id="insight-status"></span>
+    <button id="insight-settings" title="Claude API settings">&#9881;</button>
+    <button id="insight-close" class="closebtn" title="Hide panel">&#10005;</button>
+  </div>
+  <div id="insight-actions">
+    <button id="insight-analyze" title="Build a decision brief from the open document (&#8679;&#8984;A)">Analyze Document</button>
+  </div>
+  <div id="insight-out"><div class="insight-empty">Open a document and click <b>Analyze Document</b> for a decision brief:
+what's being decided, the options and trade-offs, risks, and recommended next steps.
+
+Or ask a question about the document below.</div></div>
+  <div id="insight-askrow">
+    <input id="insight-q" type="text" spellcheck="false" placeholder="Ask about this document&hellip; (Enter)">
+  </div>
+</div>
+
+</div><!-- /main-row -->
 
 <!-- ===== Status bar ===== -->
 <div id="statusbar">
@@ -191,6 +234,7 @@
 <script src="vendor/codemirror/mode/yaml.min.js"></script>
 <script src="vendor/codemirror/mode/sql.min.js"></script>
 <script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="vendor/pdf-lib.min.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

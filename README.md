@@ -32,7 +32,20 @@ the system WKWebView — so there's no bundled browser and the app stays small.
 - **Run scripts** — ⌘R runs the current Python or shell file (saving it
   first if needed) with live stdout/stderr streaming into a console panel;
   ⇧⌘R runs any one-off shell command in the file's directory, with command
-  history, a Stop button, and exit-code status — like Notepad++'s Run menu
+  history, a Stop button, and exit-code status — like Notepad++'s Run menu.
+  The console is resizable (drag its edge) and docks to the bottom or the
+  right side; size and position are remembered.
+- **PDF annotation** — Highlight mode marks selected text; Note mode pins
+  comments anywhere on a page. Annotations persist across sessions (stored
+  alongside the app, the original PDF is untouched) and *Export Annotated…*
+  saves a copy of the PDF with the highlights and notes drawn in.
+- **Decide (decision intelligence)** — ⇧⌘A sends the open document to the
+  Claude API and streams back a decision brief: what's being decided, the
+  options with trade-offs, risks, a recommendation, and next actions. Ask
+  free-form questions about the document in the same panel. Works on text
+  tabs and PDFs (via extracted text). Set your API key once under
+  Decide → Claude API Settings (stored locally with 0600 permissions;
+  requires `pip3 install anthropic`).
 - **Opens from Finder** — the built app registers itself for text, code,
   and PDF files, so right-click → *Open With* → **Notepad--** works, and
   double-clicked files open in the editor at launch

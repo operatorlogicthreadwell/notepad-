@@ -45,6 +45,26 @@ def data_dir():
 
 
 SESSION_FILE = os.path.join(data_dir(), "session.json")
+ANNOS_FILE = os.path.join(data_dir(), "annotations.json")
+CONFIG_FILE = os.path.join(data_dir(), "config.json")
+
+DECIDE_SYSTEM = """You are the decision-intelligence layer inside Notepad--, a text editor.
+You receive the document the user currently has open (notes, a plan, a draft, meeting
+minutes, code — anything) and help them decide what to do.
+
+When asked to analyze, produce a decision brief in markdown with these sections,
+omitting any that genuinely don't apply:
+## Summary — two or three sentences on what this document is and where it stands.
+## Decisions on the table — each open decision you can detect, stated as a question.
+## Options & trade-offs — for the main decision(s), the realistic options with pros/cons.
+## Risks & unknowns — what could go wrong, what information is missing.
+## Recommendation — your best call, with the reasoning in one short paragraph.
+## Next actions — a short, concrete checklist.
+
+Ground everything in the document — quote or reference specifics rather than being
+generic. If the document doesn't contain enough to work with, say so briefly.
+When the user asks a direct question instead, answer it plainly first, then add only
+the context needed to act on the answer."""
 
 
 # Files handed to us at launch (Finder "Open With" via argv-emulation, or CLI)
@@ -58,6 +78,7 @@ class Api:
         self.window = None
         self._proc = None
         self._proc_lock = threading.Lock()
+        self._ai_busy = threading.Lock()
 
     def get_startup_files(self):
         return STARTUP_FILES
@@ -166,6 +187,144 @@ class Api:
                     os.unlink(tmp)
                 except OSError:
                     pass
+
+    def write_file_b64(self, path, data_b64):
+        """Binary atomic write (exported annotated PDFs)."""
+        try:
+            data = base64.b64decode(data_b64)
+        except Exception as exc:
+            return {"error": "Bad data: " + str(exc)}
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".notepad-save-")
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+            tmp = None
+            return {"ok": True}
+        except OSError as exc:
+            return {"error": str(exc)}
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+
+    # ---- PDF annotations (sidecar storage keyed by file path) ------------
+    def _annos_all(self):
+        try:
+            with open(ANNOS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def annotations_get(self, key):
+        return {"data": self._annos_all().get(key)}
+
+    def annotations_save(self, key, data):
+        annos = self._annos_all()
+        if data and (data.get("highlights") or data.get("notes")):
+            annos[key] = data
+        else:
+            annos.pop(key, None)
+        try:
+            tmp = ANNOS_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(annos, f)
+            os.replace(tmp, ANNOS_FILE)
+            return {"ok": True}
+        except OSError as exc:
+            return {"error": str(exc)}
+
+    # ---- decision intelligence (Claude API) -------------------------------
+    def _config(self):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def get_ai_config(self):
+        cfg = self._config()
+        has_key = bool(cfg.get("api_key")) or bool(os.environ.get("ANTHROPIC_API_KEY"))
+        return {"has_key": has_key,
+                "key_source": "settings" if cfg.get("api_key")
+                              else ("environment" if os.environ.get("ANTHROPIC_API_KEY") else None),
+                "model": cfg.get("model") or "claude-opus-4-8"}
+
+    def set_ai_config(self, api_key, model):
+        cfg = self._config()
+        if api_key:                      # empty string = keep the stored key
+            cfg["api_key"] = api_key
+        if model:
+            cfg["model"] = model
+        try:
+            tmp = CONFIG_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f)
+            os.replace(tmp, CONFIG_FILE)
+            os.chmod(CONFIG_FILE, 0o600)   # the file holds an API key
+            return self.get_ai_config()
+        except OSError as exc:
+            return {"error": str(exc)}
+
+    def ai_analyze(self, text, question):
+        try:
+            import anthropic
+        except ImportError:
+            return {"error": "The 'anthropic' package isn't installed.\n"
+                             "Run:  pip3 install anthropic  and restart Notepad--."}
+        cfg = self._config()
+        api_key = cfg.get("api_key") or None   # None → SDK env/profile resolution
+        model = cfg.get("model") or "claude-opus-4-8"
+        if not api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+            return {"error": "No Claude API key configured.\n"
+                             "Open Decide → Claude API Settings and paste a key from "
+                             "platform.claude.com."}
+        if not self._ai_busy.acquire(blocking=False):
+            return {"error": "An analysis is already running.\n"}
+
+        if question:
+            prompt = ("Here is the document I have open:\n\n<document>\n%s\n</document>\n\n"
+                      "My question: %s" % (text, question))
+        else:
+            prompt = ("Here is the document I have open. Give me the decision brief.\n\n"
+                      "<document>\n%s\n</document>" % text)
+
+        def work():
+            try:
+                client = anthropic.Anthropic(api_key=api_key)
+                with client.messages.stream(
+                    model=model,
+                    max_tokens=16000,
+                    thinking={"type": "adaptive"},
+                    system=DECIDE_SYSTEM,
+                    messages=[{"role": "user", "content": prompt}],
+                ) as stream:
+                    for chunk in stream.text_stream:
+                        self._emit_js("window.__aiOutput && window.__aiOutput(%s)"
+                                      % json.dumps(chunk))
+                self._emit_js("window.__aiDone && window.__aiDone(null)")
+            except anthropic.AuthenticationError:
+                self._fail_ai("Your Claude API key was rejected — check it in "
+                              "Decide → Claude API Settings.")
+            except anthropic.RateLimitError:
+                self._fail_ai("Rate limited by the Claude API — wait a moment and retry.")
+            except anthropic.APIConnectionError:
+                self._fail_ai("Couldn't reach the Claude API — check your connection.")
+            except anthropic.APIStatusError as exc:
+                self._fail_ai("Claude API error (%s): %s" % (exc.status_code, exc.message))
+            except Exception as exc:
+                self._fail_ai(str(exc))
+            finally:
+                self._ai_busy.release()
+
+        threading.Thread(target=work, daemon=True).start()
+        return {"ok": True}
+
+    def _fail_ai(self, message):
+        self._emit_js("window.__aiDone && window.__aiDone(%s)" % json.dumps(message))
 
     # ---- session (Notepad++-style "never lose a note") ------------------
     def load_session(self):

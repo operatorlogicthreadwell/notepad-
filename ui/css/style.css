@@ -157,6 +157,20 @@ body {
 }
 .tab .close:hover { background: #D53434; color: #fff; }
 
+/* ===== Main work area layout ===== */
+#main-row {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+#main-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* ===== Editor ===== */
 #editor-container {
   flex: 1 1 auto;
@@ -237,6 +251,37 @@ body {
 }
 .pdf-page canvas { display: block; }
 
+/* PDF annotation modes + layers */
+#pdf-toolbar .pdfmode.on { border-color: #316AC5; background: #C1D2EE; }
+#pdf-pages.mode-note .pdf-page { cursor: copy; }
+.anno-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.anno-hl {
+  position: absolute;
+  background: rgba(255, 220, 60, .42);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.anno-hl:hover { outline: 2px solid #E0A800; }
+.anno-pin {
+  position: absolute;
+  width: 22px; height: 22px;
+  margin: -11px 0 0 -11px;
+  background: #FFD84D;
+  border: 1px solid #B8860B;
+  border-radius: 50% 50% 50% 0;
+  box-shadow: 1px 1px 3px rgba(0,0,0,.4);
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+  line-height: 20px;
+}
+.anno-pin:hover { background: #FFE88A; }
+
 /* PDF.js text layer (enables selection + search highlighting) */
 .textLayer {
   position: absolute;
@@ -290,15 +335,37 @@ body {
 #find-count { color: #666; font-size: 12px; }
 .closebtn { margin-left: auto; }
 
-/* ===== Run console ===== */
+/* ===== Run console (resizable; docks bottom or right) ===== */
 #console {
-  flex: 0 0 190px;
+  flex: 0 0 auto;
+  height: 190px;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
   border-top: 1px solid #999;
   background: #1E1E1E;
 }
+#console.dock-right {
+  height: auto;
+  width: 420px;
+  min-width: 0;
+  border-top: none;
+  border-left: 1px solid #999;
+}
+#console-resizer {
+  position: absolute;
+  top: -3px; left: 0; right: 0;
+  height: 7px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+#console.dock-right #console-resizer {
+  top: 0; bottom: 0; left: -3px; right: auto;
+  width: 7px; height: auto;
+  cursor: ew-resize;
+}
+#console-resizer:hover { background: rgba(49, 106, 197, .35); }
 #console-bar {
   display: flex;
   align-items: center;
@@ -349,6 +416,85 @@ body {
 .con-out { color: #D4D4D4; }
 .con-err { color: #FF7B72; }
 .con-cmd { color: #7EE787; }
+
+/* ===== Decide panel ===== */
+#insight {
+  flex: 0 0 400px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid #999;
+  background: #FAF9F3;
+}
+#insight-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(#4A79D9, #28457F);
+  color: #fff;
+  padding: 4px 8px;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+#insight-title { font-weight: 700; }
+#insight-status { flex: 1 1 auto; color: #CFE0FF; }
+#insight-status.run { color: #FFE88A; }
+#insight-status.fail { color: #FFB3B3; }
+#insight-bar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 7px;
+  font-size: 13px;
+}
+#insight-bar button:hover { border-color: #fff; }
+#insight-actions {
+  padding: 6px 8px;
+  border-bottom: 1px solid #E2DFD2;
+  flex: 0 0 auto;
+}
+#insight-actions button {
+  padding: 4px 12px;
+  background: linear-gradient(#fff, #E3E1D5);
+  border: 1px solid #999;
+  border-radius: 3px;
+  font-size: 12px;
+}
+#insight-actions button:hover { border-color: #316AC5; }
+#insight-out {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+#insight-out h2 { font-size: 14px; margin: 12px 0 4px; color: #28457F; }
+#insight-out h3 { font-size: 13px; margin: 10px 0 3px; }
+#insight-out ul { margin: 2px 0 6px 22px; }
+#insight-out p { margin: 4px 0; }
+#insight-out pre {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+}
+.insight-empty { color: #888; white-space: pre-wrap; }
+#insight-askrow {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-top: 1px solid #E2DFD2;
+}
+#insight-q {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid #7F9DB9;
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 /* ===== Status bar ===== */
 #statusbar {

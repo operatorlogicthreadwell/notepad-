@@ -80,6 +80,30 @@ machine, Python backend, JS↔Python bridge contract).
 | Trust the formatting conversion: Notes HTML ⇄ plain text round-trips stably (lists become `- item`) | `backend` |
 | Get a clear fix-it message if I denied the automation permission | `backend` (error mapping) |
 
+## Console UX
+
+| As a user, I can… | Verified by |
+|---|---|
+| Resize the console by dragging its edge; dock it to the bottom or the right side; both persist | `features3` |
+
+## PDF annotation
+
+| As a user, I can… | Verified by |
+|---|---|
+| Highlight selected text on a PDF page; pin notes with comments anywhere | `features3` |
+| Have annotations persist across closing/reopening (sidecar storage; original PDF untouched) | `features3` |
+| Edit or delete any highlight/note by clicking it | `features3` |
+| Export a copy of the PDF with annotations drawn in (pdf-lib) | `features3` |
+
+## Decide (decision intelligence)
+
+| As a user, I can… | Verified by |
+|---|---|
+| Get a streamed decision brief (decisions, options/trade-offs, risks, recommendation, next actions) for the open document via the Claude API (⇧⌘A) | `features3` (UI + streaming with demo backend); real API call **manual-macOS** |
+| Ask free-form questions about the document | `features3` |
+| Configure my API key and model once; key stored locally (0600), never echoed back | `features3` (dialog), `backend` (storage) |
+| Get setup guidance instead of an error when no key/package is present | `backend` |
+
 ## Known gaps / honest caveats
 
 - **macOS-native paths are manually tested only**: real file dialogs, quit
