@@ -157,6 +157,16 @@ body {
 }
 .tab .close:hover { background: #D53434; color: #fff; }
 
+/* ===== Classic edition: hide the AI-evolved surface ===== */
+body.classic .menu[data-menu=decide],
+body.classic .mi[data-cmd=pdfToText],
+body.classic .mi[data-cmd=openNote],
+body.classic .mi[data-cmd=sendToNotes],
+body.classic #insight,
+body.classic #pdf-container {
+  display: none !important;
+}
+
 /* ===== Main work area layout ===== */
 #main-row {
   flex: 1 1 auto;

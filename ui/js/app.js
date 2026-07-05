@@ -120,6 +120,14 @@
       catch (e) { return []; }
     },
 
+    async getEdition() {
+      if (!this.isShim) {
+        try { return (await this.api.get_edition()).edition || "ai"; }
+        catch (e) { return "ai"; }
+      }
+      return new URLSearchParams(location.search).get("edition") || "ai";
+    },
+
     async writeFileB64(path, b64) {
       if (!this.isShim) return this.api.write_file_b64(path, b64);
       const bin = atob(b64);
@@ -227,6 +235,11 @@
   // ======================================================================
   const tabs = [];        // {id, path, name, doc, cleanGen, lang, encoding, eol, scroll}
   let activeTab = null;
+  let edition = "ai";     // "classic" (true to Notepad++) or "ai" (evolved)
+  const isClassic = () => edition === "classic";
+  // Commands that belong to the AI-evolved edition only
+  const AI_COMMANDS = ["aiAnalyze", "aiAsk", "aiSettings", "toggleInsight",
+                       "openNote", "sendToNotes", "pdfToText"];
   let untitledCounter = 0;
   let cm = null;
   const settings = { wrap: false, lineNumbers: true, fontSize: 13,
@@ -412,6 +425,11 @@
     for (const pick of picks || []) {
       if (pick && pick.shimName !== undefined) {   // browser demo mode
         if (pick.shimPdfBytes) {
+          if (isClassic()) {
+            showAlert("Notepad-- AI feature",
+              "PDF viewing and annotation live in the Notepad-- AI edition.");
+            continue;
+          }
           await openPdfBytes(pick.shimPdfBytes, null, pick.shimName);
         } else {
           newTab({ name: pick.shimName, content: pick.shimContent,
@@ -427,6 +445,12 @@
     const existing = tabs.find((t) => t.path === path);
     if (existing) { activateTab(existing); return; }
     if (/\.pdf$/i.test(path)) {
+      if (isClassic()) {
+        showAlert("Notepad-- AI feature",
+          "PDF viewing and annotation live in the Notepad-- AI edition.\n" +
+          "Open this file there, or use another PDF viewer.");
+        return;
+      }
       const res = await backend.readFileB64(path);
       if (res.error) { showAlert("Open failed", res.error); return; }
       await openPdfBytes(base64ToBytes(res.data), path, path.split("/").pop());
@@ -1109,6 +1133,7 @@
       const st = s.tabs[i];
       let tab = null;
       if (st.type === "pdf") {
+        if (isClassic()) continue;                 // separate session files make this moot,
         if (!st.path) continue;                    // browser-demo PDFs can't be reopened
         const res = await backend.readFileB64(st.path);
         if (res.error) { missing.push(st.name || st.path); continue; }
@@ -1855,6 +1880,7 @@
   }
 
   function runCommand(cmd) {
+    if (isClassic() && AI_COMMANDS.includes(cmd)) return;
     const isPdf = activeTab && activeTab.type === "pdf";
     if (isPdf) {
       // Editor-only commands are no-ops on a read-only PDF tab
@@ -1975,6 +2001,8 @@
     setupConsole();
     setupInsight();
     await backend.init();
+    edition = await backend.getEdition();
+    if (isClassic()) document.body.classList.add("classic");
     await restoreSession();
     // Files the app was launched with (Finder "Open With", CLI args)
     for (const p of await backend.startupFiles()) await openPath(p);

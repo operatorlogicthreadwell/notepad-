@@ -104,6 +104,14 @@ machine, Python backend, JS↔Python bridge contract).
 | Configure my API key and model once; key stored locally (0600), never echoed back | `features3` (dialog), `backend` (storage) |
 | Get setup guidance instead of an error when no key/package is present | `backend` |
 
+## Two editions
+
+| As a user, I can… | Verified by |
+|---|---|
+| Run a classic edition true to Notepad++ (no PDF/Notes/AI surface, menus hidden, shortcuts inert, PDFs politely refused) while the editing core works unchanged | `classic` (tests/browser/test_classic.js), `backend` |
+| Run the AI edition with everything enabled; each edition keeps its own session file | `backend` (session separation); all other suites cover the AI edition |
+| Build both .app bundles with one `./build_app.sh` run | **manual-macOS** |
+
 ## Known gaps / honest caveats
 
 - **macOS-native paths are manually tested only**: real file dialogs, quit

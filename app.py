@@ -20,7 +20,14 @@ import threading
 
 import webview
 
+# Two editions from one codebase:
+#   classic — true to Notepad++: editing, find/replace, session, Run
+#   ai      — adds PDF viewing/annotation, Apple Notes, and the Decide panel
+EDITION = ("classic"
+           if os.environ.get("NOTEPAD_EDITION") == "classic" or "--classic" in sys.argv
+           else "ai")
 APP_NAME = "Notepad--"
+APP_TITLE = "Notepad--" if EDITION == "classic" else "Notepad-- AI"
 
 
 def ui_file():
@@ -44,7 +51,10 @@ def data_dir():
     return path
 
 
-SESSION_FILE = os.path.join(data_dir(), "session.json")
+# Separate sessions per edition, so classic never silently drops the AI
+# edition's PDF/Apple Notes tabs (and vice versa)
+SESSION_FILE = os.path.join(
+    data_dir(), "session.json" if EDITION == "ai" else "session-classic.json")
 ANNOS_FILE = os.path.join(data_dir(), "annotations.json")
 CONFIG_FILE = os.path.join(data_dir(), "config.json")
 
@@ -82,6 +92,9 @@ class Api:
 
     def get_startup_files(self):
         return STARTUP_FILES
+
+    def get_edition(self):
+        return {"edition": EDITION}
 
     # ---- dialogs -------------------------------------------------------
     def open_dialog(self):
@@ -565,7 +578,7 @@ JSON.stringify(out.slice(0, 500));
 def main():
     api = Api()
     window = webview.create_window(
-        APP_NAME,
+        APP_TITLE,
         ui_file(),
         js_api=api,
         width=1100,
