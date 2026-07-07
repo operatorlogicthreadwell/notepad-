@@ -872,16 +872,19 @@ def install_open_documents_handler(api):
     except ImportError:
         return  # pywebview's cocoa backend ships pyobjc; other envs won't
 
-    def open_paths(paths):
-        try:
-            api.open_external([str(p) for p in paths])
-            AppKit.NSApp.activateIgnoringOtherApps_(True)
-        except Exception:
-            pass  # never let an error travel back into the Apple Event reply
-
     def application_openFiles_(self, app_obj, filenames):
+        paths = [str(f) for f in filenames]
         try:
-            open_paths(list(filenames))
+            try:
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
+            except Exception:
+                pass
+            # DEADLOCK TRAP: this delegate method runs on the main thread,
+            # and open_external → evaluate_js dispatches to the main thread
+            # and blocks for the result. Calling it here beachballs the app.
+            # Hand it to a background thread and return immediately.
+            threading.Thread(target=api.open_external, args=(paths,),
+                             daemon=True).start()
         finally:
             try:
                 # NSApplicationDelegateReplySuccess = 0 — tells Launch
