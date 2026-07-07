@@ -63,8 +63,16 @@ the system WKWebView — so there's no bundled browser and the app stays small.
   under Decide → AI Provider Settings (keys stored locally with 0600
   permissions; `pip3 install anthropic` and/or `openai`).
 - **Opens from Finder** — the built app registers itself for text, code,
-  and PDF files, so right-click → *Open With* → **Notepad--** works, and
-  double-clicked files open in the editor at launch
+  and PDF files, so right-click → *Open With* → **Notepad--** and setting
+  it as the default app both work. Double-clicked files open whether the
+  app is closed (launches with the file) or already running (the file
+  lands in a new tab and the window comes to the front) — handled via the
+  macOS open-documents Apple Event
+- **Skins** — six looks under View → Skin: **Classic** (the Notepad++
+  default), **Dark**, **Solarized Light**, **Solarized Dark**, **Monokai**,
+  and **Matrix** (black and phosphor green, glow included). A skin restyles
+  the whole app — menus, toolbar, tabs, editor and syntax colors — and is
+  remembered across sessions
 - **Apple Notes** — *File → Open Apple Note…* lists your notes (filter-as-
   you-type), opens one as a tab, and ⌘S saves your edits back into Apple
   Notes; *Send Tab to Apple Notes* turns any tab into a new note. Uses

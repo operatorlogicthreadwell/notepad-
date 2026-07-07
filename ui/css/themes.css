@@ -1,0 +1,496 @@
+/* Notepad-- skins.
+   Each skin overrides the palette variables declared in style.css.
+   The Classic skin is the :root default there — no block needed here.
+   Selected via html[data-theme=...]; set in View → Skin (persisted in the
+   session and mirrored to localStorage for a flash-free first paint). */
+
+/* ===== Dark ===== */
+html[data-theme="dark"] {
+  --chrome-bg: #2D2D30;
+  --chrome-bg2: #333337;
+  --chrome-border: #1F1F22;
+  --chrome-border2: #454549;
+  --text: #E8E8E8;
+  --text-dim: #A0A0A0;
+  --accent: #4A90D9;
+  --hover-bg: #3E3E42;
+  --hover-soft-bg: #38383C;
+
+  --dropdown-bg: #252528;
+  --dropdown-border: #454549;
+  --dropdown-shadow: rgba(0, 0, 0, .6);
+  --mi-hover-bg: #094771;
+  --mi-hover-fg: #fff;
+  --key-fg: #909090;
+  --key-hover-fg: #BBD6F0;
+  --sep: #454549;
+
+  --toolbar-grad-a: #38383C;
+  --toolbar-grad-b: #2D2D30;
+  --tbsep: #48484C;
+
+  --tabbar-bg: #252526;
+  --tabbar-border: #1A1A1C;
+  --tab-grad-a: #333337;
+  --tab-grad-b: #2A2A2E;
+  --tab-border: #1A1A1C;
+  --tab-fg: #B8B8B8;
+  --tab-active-bg: #1E1E1E;
+  --tab-active-fg: #FFFFFF;
+  --tab-accent: #FF8000;
+  --dot-saved: #4A90D9;
+  --dot-dirty: #E05252;
+  --scrollthumb: #5A5A5E;
+
+  --editor-bg: #1E1E1E;
+  --editor-fg: #D4D4D4;
+  --caret: #E8E8E8;
+  --gutter-bg: #252526;
+  --gutter-border: #333337;
+  --linenum-fg: #858585;
+  --activeline-bg: #2A2D2E;
+  --selection-bg: rgba(38, 79, 120, .75);
+  --search-bg: #613A00;
+  --search-outline: #B8860B;
+  --bracket-fg: #FFD700;
+  --bracket-bg: #3A3D41;
+
+  --syn-keyword: #569CD6;
+  --syn-atom: #569CD6;
+  --syn-number: #B5CEA8;
+  --syn-def: #DCDCAA;
+  --syn-variable: #D4D4D4;
+  --syn-variable2: #9CDCFE;
+  --syn-property: #9CDCFE;
+  --syn-operator: #D4D4D4;
+  --syn-comment: #6A9955;
+  --syn-string: #CE9178;
+  --syn-string2: #D16969;
+  --syn-meta: #C586C0;
+  --syn-builtin: #4EC9B0;
+  --syn-tag: #569CD6;
+  --syn-attribute: #9CDCFE;
+  --syn-header: #569CD6;
+  --syn-link: #3794FF;
+  --syn-hr: #858585;
+
+  --btn-grad-a: #3E3E42;
+  --btn-grad-b: #2D2D30;
+  --btn-border: #555559;
+  --btn-active-bg: #094771;
+  --input-bg: #3C3C3C;
+  --input-fg: #E8E8E8;
+  --input-border: #5A5A5E;
+  --input-notfound-bg: #5A1D1D;
+
+  --panel-bg: #252526;
+  --panel-border: #3F3F44;
+  --titlebar-grad-a: #3A6EA5;
+  --titlebar-grad-b: #24466B;
+  --status-fg: #C8C8C8;
+  --modal-bg: #2D2D30;
+  --modal-border: #555;
+  --backdrop: rgba(0, 0, 0, .5);
+  --list-bg: #1E1E1E;
+  --list-border: #333337;
+
+  --pdf-bg: #404040;
+  --ok: #6FBF73;
+  --warn: #D9A741;
+  --fail: #E05252;
+}
+
+/* ===== Solarized Light ===== */
+html[data-theme="solarized-light"] {
+  --chrome-bg: #EEE8D5;
+  --chrome-bg2: #F4EEDB;
+  --chrome-border: #D6CFB8;
+  --chrome-border2: #D6CFB8;
+  --text: #586E75;
+  --text-dim: #93A1A1;
+  --accent: #268BD2;
+  --hover-bg: #E3DCC5;
+  --hover-soft-bg: #EAE3CC;
+
+  --dropdown-bg: #FDF6E3;
+  --dropdown-border: #C9C2AB;
+  --mi-hover-bg: #268BD2;
+  --key-fg: #93A1A1;
+  --key-hover-fg: #D8EAF7;
+  --sep: #E3DCC5;
+
+  --toolbar-grad-a: #F8F2DF;
+  --toolbar-grad-b: #EEE8D5;
+  --tbsep: #D6CFB8;
+
+  --tabbar-bg: #E3DCC5;
+  --tabbar-border: #B8B09A;
+  --tab-grad-a: #F0EAD7;
+  --tab-grad-b: #E3DCC5;
+  --tab-border: #B8B09A;
+  --tab-fg: #657B83;
+  --tab-active-bg: #FDF6E3;
+  --tab-active-fg: #073642;
+  --tab-accent: #CB4B16;
+  --dot-saved: #268BD2;
+  --dot-dirty: #DC322F;
+  --scrollthumb: #C9C2AB;
+
+  --editor-bg: #FDF6E3;
+  --editor-fg: #657B83;
+  --caret: #586E75;
+  --gutter-bg: #EEE8D5;
+  --gutter-border: #E0D9C3;
+  --linenum-fg: #93A1A1;
+  --activeline-bg: #EEE8D5;
+  --selection-bg: rgba(147, 161, 161, .35);
+  --search-bg: #F7D8A8;
+  --search-outline: #CB4B16;
+  --bracket-fg: #DC322F;
+  --bracket-bg: #EEE8D5;
+
+  --syn-keyword: #859900;
+  --syn-atom: #6C71C4;
+  --syn-number: #D33682;
+  --syn-def: #268BD2;
+  --syn-variable: #657B83;
+  --syn-variable2: #268BD2;
+  --syn-property: #657B83;
+  --syn-operator: #657B83;
+  --syn-comment: #93A1A1;
+  --syn-string: #2AA198;
+  --syn-string2: #CB4B16;
+  --syn-meta: #B58900;
+  --syn-builtin: #B58900;
+  --syn-tag: #268BD2;
+  --syn-attribute: #93A1A1;
+  --syn-header: #268BD2;
+  --syn-link: #268BD2;
+  --syn-hr: #93A1A1;
+
+  --btn-grad-a: #FDF6E3;
+  --btn-grad-b: #E9E2CB;
+  --btn-border: #B8B09A;
+  --btn-active-bg: #D8EAF7;
+  --input-bg: #FDF6E3;
+  --input-fg: #586E75;
+  --input-border: #93A1A1;
+  --input-notfound-bg: #F5CFCE;
+
+  --panel-bg: #F4EEDB;
+  --panel-border: #E0D9C3;
+  --titlebar-grad-a: #268BD2;
+  --titlebar-grad-b: #15547F;
+  --status-fg: #586E75;
+  --modal-bg: #EEE8D5;
+  --modal-border: #93A1A1;
+  --list-bg: #FDF6E3;
+  --list-border: #EEE8D5;
+
+  --pdf-bg: #B5AD95;
+}
+
+/* ===== Solarized Dark ===== */
+html[data-theme="solarized-dark"] {
+  --chrome-bg: #073642;
+  --chrome-bg2: #0A3E4C;
+  --chrome-border: #04262F;
+  --chrome-border2: #0E4757;
+  --text: #93A1A1;
+  --text-dim: #657B83;
+  --accent: #268BD2;
+  --hover-bg: #0E4757;
+  --hover-soft-bg: #0B4150;
+
+  --dropdown-bg: #04303B;
+  --dropdown-border: #0E4757;
+  --dropdown-shadow: rgba(0, 0, 0, .6);
+  --mi-hover-bg: #268BD2;
+  --key-fg: #657B83;
+  --key-hover-fg: #D8EAF7;
+  --sep: #0E4757;
+
+  --toolbar-grad-a: #0A3E4C;
+  --toolbar-grad-b: #073642;
+  --tbsep: #0E4757;
+
+  --tabbar-bg: #04262F;
+  --tabbar-border: #021A20;
+  --tab-grad-a: #0A3E4C;
+  --tab-grad-b: #062E39;
+  --tab-border: #021A20;
+  --tab-fg: #839496;
+  --tab-active-bg: #002B36;
+  --tab-active-fg: #EEE8D5;
+  --tab-accent: #CB4B16;
+  --dot-saved: #268BD2;
+  --dot-dirty: #DC322F;
+  --scrollthumb: #0E4757;
+
+  --editor-bg: #002B36;
+  --editor-fg: #839496;
+  --caret: #93A1A1;
+  --gutter-bg: #073642;
+  --gutter-border: #0A3E4C;
+  --linenum-fg: #586E75;
+  --activeline-bg: #073642;
+  --selection-bg: rgba(88, 110, 117, .45);
+  --search-bg: #6B4A00;
+  --search-outline: #B58900;
+  --bracket-fg: #DC322F;
+  --bracket-bg: #073642;
+
+  --syn-keyword: #859900;
+  --syn-atom: #6C71C4;
+  --syn-number: #D33682;
+  --syn-def: #268BD2;
+  --syn-variable: #839496;
+  --syn-variable2: #268BD2;
+  --syn-property: #839496;
+  --syn-operator: #839496;
+  --syn-comment: #586E75;
+  --syn-string: #2AA198;
+  --syn-string2: #CB4B16;
+  --syn-meta: #B58900;
+  --syn-builtin: #B58900;
+  --syn-tag: #268BD2;
+  --syn-attribute: #93A1A1;
+  --syn-header: #268BD2;
+  --syn-link: #268BD2;
+  --syn-hr: #586E75;
+
+  --btn-grad-a: #0E4757;
+  --btn-grad-b: #073642;
+  --btn-border: #164E5E;
+  --btn-active-bg: #15547F;
+  --input-bg: #002B36;
+  --input-fg: #93A1A1;
+  --input-border: #164E5E;
+  --input-notfound-bg: #5A1D1D;
+
+  --panel-bg: #04303B;
+  --panel-border: #0E4757;
+  --titlebar-grad-a: #268BD2;
+  --titlebar-grad-b: #15547F;
+  --status-fg: #839496;
+  --modal-bg: #073642;
+  --modal-border: #164E5E;
+  --backdrop: rgba(0, 0, 0, .5);
+  --list-bg: #002B36;
+  --list-border: #073642;
+
+  --pdf-bg: #04262F;
+  --ok: #859900;
+  --warn: #B58900;
+  --fail: #DC322F;
+}
+
+/* ===== Monokai ===== */
+html[data-theme="monokai"] {
+  --chrome-bg: #3E3D32;
+  --chrome-bg2: #454439;
+  --chrome-border: #2A2A22;
+  --chrome-border2: #55544A;
+  --text: #F8F8F2;
+  --text-dim: #A6A692;
+  --accent: #66D9EF;
+  --hover-bg: #524F3D;
+  --hover-soft-bg: #4A4838;
+
+  --dropdown-bg: #34342B;
+  --dropdown-border: #55544A;
+  --dropdown-shadow: rgba(0, 0, 0, .6);
+  --mi-hover-bg: #75715E;
+  --mi-hover-fg: #F8F8F2;
+  --key-fg: #A6A692;
+  --key-hover-fg: #E6DB74;
+  --sep: #55544A;
+
+  --toolbar-grad-a: #454439;
+  --toolbar-grad-b: #3E3D32;
+  --tbsep: #55544A;
+
+  --tabbar-bg: #34342B;
+  --tabbar-border: #23231C;
+  --tab-grad-a: #454439;
+  --tab-grad-b: #383830;
+  --tab-border: #23231C;
+  --tab-fg: #C2C2B0;
+  --tab-active-bg: #272822;
+  --tab-active-fg: #F8F8F2;
+  --tab-accent: #F92672;
+  --dot-saved: #66D9EF;
+  --dot-dirty: #F92672;
+  --scrollthumb: #75715E;
+
+  --editor-bg: #272822;
+  --editor-fg: #F8F8F2;
+  --caret: #F8F8F0;
+  --gutter-bg: #2F302A;
+  --gutter-border: #3E3D32;
+  --linenum-fg: #90908A;
+  --activeline-bg: #3E3D32;
+  --selection-bg: rgba(73, 72, 62, .99);
+  --search-bg: #6B5900;
+  --search-outline: #E6DB74;
+  --bracket-fg: #F92672;
+  --bracket-bg: #3E3D32;
+
+  --syn-keyword: #F92672;
+  --syn-atom: #AE81FF;
+  --syn-number: #AE81FF;
+  --syn-def: #A6E22E;
+  --syn-variable: #F8F8F2;
+  --syn-variable2: #9EFFFF;
+  --syn-property: #66D9EF;
+  --syn-operator: #F92672;
+  --syn-comment: #75715E;
+  --syn-string: #E6DB74;
+  --syn-string2: #FD971F;
+  --syn-meta: #75715E;
+  --syn-builtin: #66D9EF;
+  --syn-tag: #F92672;
+  --syn-attribute: #A6E22E;
+  --syn-header: #A6E22E;
+  --syn-link: #66D9EF;
+  --syn-hr: #75715E;
+
+  --btn-grad-a: #524F3D;
+  --btn-grad-b: #3E3D32;
+  --btn-border: #6B6A5A;
+  --btn-active-bg: #75715E;
+  --input-bg: #272822;
+  --input-fg: #F8F8F2;
+  --input-border: #6B6A5A;
+  --input-notfound-bg: #6E2440;
+
+  --panel-bg: #34342B;
+  --panel-border: #4A4838;
+  --titlebar-grad-a: #75715E;
+  --titlebar-grad-b: #4A4838;
+  --status-fg: #E0E0D2;
+  --modal-bg: #3E3D32;
+  --modal-border: #6B6A5A;
+  --backdrop: rgba(0, 0, 0, .5);
+  --list-bg: #272822;
+  --list-border: #34342B;
+
+  --pdf-bg: #4A4838;
+  --ok: #A6E22E;
+  --warn: #E6DB74;
+  --fail: #F92672;
+}
+
+/* ===== Matrix ===== */
+html[data-theme="matrix"] {
+  --chrome-bg: #021202;
+  --chrome-bg2: #031A03;
+  --chrome-border: #0A3D0A;
+  --chrome-border2: #0A3D0A;
+  --text: #00E63C;
+  --text-dim: #00992E;
+  --accent: #00FF41;
+  --hover-bg: #063D14;
+  --hover-soft-bg: #052E0F;
+
+  --dropdown-bg: #021502;
+  --dropdown-border: #0F5F1F;
+  --dropdown-shadow: rgba(0, 255, 65, .15);
+  --mi-hover-bg: #00551B;
+  --mi-hover-fg: #7DFFA1;
+  --key-fg: #00992E;
+  --key-hover-fg: #B3FFC9;
+  --sep: #0A3D0A;
+
+  --toolbar-grad-a: #042104;
+  --toolbar-grad-b: #021202;
+  --tbsep: #0A3D0A;
+
+  --tabbar-bg: #010D01;
+  --tabbar-border: #0A3D0A;
+  --tab-grad-a: #042104;
+  --tab-grad-b: #021502;
+  --tab-border: #0A3D0A;
+  --tab-fg: #00B336;
+  --tab-active-bg: #000000;
+  --tab-active-fg: #00FF41;
+  --tab-accent: #00FF41;
+  --dot-saved: #00B336;
+  --dot-dirty: #FF3B30;
+  --scrollthumb: #0F5F1F;
+
+  --editor-bg: #000000;
+  --editor-fg: #00FF41;
+  --caret: #00FF41;
+  --gutter-bg: #000000;
+  --gutter-border: #0A3D0A;
+  --linenum-fg: #007A26;
+  --activeline-bg: #031A03;
+  --selection-bg: rgba(0, 255, 65, .25);
+  --search-bg: #145214;
+  --search-outline: #00FF41;
+  --bracket-fg: #B3FFC9;
+  --bracket-bg: #0A3D0A;
+
+  /* everything is green in the Matrix — just different shades */
+  --syn-keyword: #00FF87;
+  --syn-atom: #66FFA3;
+  --syn-number: #99FFBC;
+  --syn-def: #33FF6B;
+  --syn-variable: #00E63C;
+  --syn-variable2: #4DFF82;
+  --syn-property: #4DFF82;
+  --syn-operator: #00CC38;
+  --syn-comment: #00701F;
+  --syn-string: #7DFFA1;
+  --syn-string2: #B3FFC9;
+  --syn-meta: #00A82F;
+  --syn-builtin: #66FFA3;
+  --syn-tag: #00FF87;
+  --syn-attribute: #99FFBC;
+  --syn-header: #00FF87;
+  --syn-link: #66FFA3;
+  --syn-hr: #00701F;
+
+  --btn-grad-a: #063D14;
+  --btn-grad-b: #021502;
+  --btn-border: #0F5F1F;
+  --btn-active-bg: #0A521E;
+  --input-bg: #000000;
+  --input-fg: #00FF41;
+  --input-border: #0F5F1F;
+  --input-notfound-bg: #3D0A0A;
+
+  --console-bg: #000000;
+  --console-fg: #00E63C;
+  --console-err: #FF6B5E;
+  --console-cmd: #B3FFC9;
+
+  --panel-bg: #010D01;
+  --panel-border: #0A3D0A;
+  --titlebar-grad-a: #0A521E;
+  --titlebar-grad-b: #021502;
+  --titlebar-fg: #00FF41;
+  --status-fg: #00CC38;
+  --modal-bg: #021202;
+  --modal-border: #0F5F1F;
+  --backdrop: rgba(0, 20, 0, .6);
+  --list-bg: #000000;
+  --list-border: #0A3D0A;
+
+  --pdf-bg: #010D01;
+  --ok: #00FF41;
+  --warn: #CCFF66;
+  --fail: #FF3B30;
+}
+
+/* the phosphor glow */
+html[data-theme="matrix"] .CodeMirror,
+html[data-theme="matrix"] #console-out {
+  text-shadow: 0 0 5px rgba(0, 255, 65, .45);
+}
+html[data-theme="matrix"] body,
+html[data-theme="matrix"] input,
+html[data-theme="matrix"] button {
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+}

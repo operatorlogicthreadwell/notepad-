@@ -83,7 +83,7 @@ When the user asks a direct question instead, answer it plainly first, then add 
 the context needed to act on the answer."""
 
 
-# Files handed to us at launch (Finder "Open With" via argv-emulation, or CLI)
+# Files handed to us on the command line (python3 app.py somefile.txt)
 STARTUP_FILES = [a for a in sys.argv[1:] if not a.startswith("-") and os.path.isfile(a)]
 
 
@@ -103,9 +103,34 @@ class Api:
         self._proc = None
         self._proc_lock = threading.Lock()
         self._ai_busy = threading.Lock()
+        # Files from Finder (Apple "open documents" events). Events that
+        # arrive before the UI has booted are queued and handed over when
+        # the UI calls ui_ready().
+        self._files_lock = threading.Lock()
+        self._pending_files = []
+        self._ui_is_ready = False
 
     def get_startup_files(self):
         return STARTUP_FILES
+
+    def ui_ready(self):
+        """The UI finished booting: flush any queued Finder-opened files."""
+        with self._files_lock:
+            self._ui_is_ready = True
+            pending, self._pending_files = self._pending_files, []
+        return {"pending": pending}
+
+    def open_external(self, paths):
+        """Called from the macOS open-documents event handler (any time)."""
+        paths = [p for p in paths if os.path.isfile(p)]
+        if not paths:
+            return
+        with self._files_lock:
+            if not self._ui_is_ready:
+                self._pending_files.extend(paths)
+                return
+        self._emit_js("window.__openExternal && window.__openExternal(%s)"
+                      % json.dumps(paths))
 
     def get_edition(self):
         return {"edition": EDITION}
@@ -680,6 +705,66 @@ JSON.stringify(out.slice(0, 500));
         return True
 
 
+# Keep a reference so the Objective-C handler object isn't garbage-collected
+_OPEN_DOC_HANDLER = None
+
+
+def install_open_documents_handler(api):
+    """Receive files double-clicked in Finder, at launch AND while running.
+
+    PyInstaller's --argv-emulation only translates the open-documents Apple
+    Event into argv at process start — a file double-clicked while the app
+    is already running was silently dropped (and the emulation itself is
+    flaky under windowed WKWebView apps). Registering a real handler for
+    the kAEOpenDocuments event fixes both: macOS queues the event through
+    app launch and delivers it once the run loop starts, and keeps
+    delivering later ones for as long as the app lives.
+    """
+    global _OPEN_DOC_HANDLER
+    if sys.platform != "darwin":
+        return
+    try:
+        from Foundation import NSObject, NSAppleEventManager, NSURL
+        import AppKit
+    except ImportError:
+        return  # pywebview's cocoa backend ships pyobjc; dev envs without it
+
+    fourcc = lambda code: int.from_bytes(code.encode("mac-roman"), "big")
+    K_CORE_EVENT = fourcc("aevt")
+    K_OPEN_DOCS = fourcc("odoc")
+    KEY_DIRECT_OBJECT = fourcc("----")
+    TYPE_FILE_URL = fourcc("furl")
+
+    class OpenDocHandler(NSObject):
+        def handleOpenEvent_withReplyEvent_(self, event, reply):
+            paths = []
+            docs = event.paramDescriptorForKeyword_(KEY_DIRECT_OBJECT)
+            if docs is not None:
+                for i in range(1, docs.numberOfItems() + 1):
+                    item = docs.descriptorAtIndex_(i)
+                    if item is None:
+                        continue
+                    furl = item.coerceToDescriptorType_(TYPE_FILE_URL)
+                    if furl is None:
+                        continue
+                    url = NSURL.URLWithString_(furl.stringValue() or "")
+                    if url is not None and url.path():
+                        paths.append(str(url.path()))
+            if paths:
+                api.open_external(paths)
+            # Come to the front, like any Mac editor when handed a file
+            try:
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
+            except Exception:
+                pass
+
+    _OPEN_DOC_HANDLER = OpenDocHandler.alloc().init()
+    NSAppleEventManager.sharedAppleEventManager() \
+        .setEventHandler_andSelector_forEventClass_andEventID_(
+            _OPEN_DOC_HANDLER, b"handleOpenEvent:withReplyEvent:",
+            K_CORE_EVENT, K_OPEN_DOCS)
+
+
 def main():
     api = Api()
     window = webview.create_window(
@@ -692,6 +777,7 @@ def main():
         text_select=True,
     )
     api.window = window
+    install_open_documents_handler(api)
 
     # NOTE: do not call window.evaluate_js from the `closing` event — on macOS
     # it deadlocks the main thread and the app hangs on quit. The UI persists

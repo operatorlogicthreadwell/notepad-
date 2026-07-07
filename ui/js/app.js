@@ -120,6 +120,14 @@
       catch (e) { return []; }
     },
 
+    // Tell the backend the UI can accept files; returns Finder-opened
+    // files that arrived while we were still booting.
+    async uiReady() {
+      if (this.isShim || !this.api.ui_ready) return [];
+      try { return (await this.api.ui_ready()).pending || []; }
+      catch (e) { return []; }
+    },
+
     async getEdition() {
       if (!this.isShim) {
         try { return (await this.api.get_edition()).edition || "ai"; }
@@ -252,7 +260,20 @@
   let untitledCounter = 0;
   let cm = null;
   const settings = { wrap: false, lineNumbers: true, fontSize: 13,
-                     consoleH: 190, consoleW: 420, consoleDock: "bottom" };
+                     consoleH: 190, consoleW: 420, consoleDock: "bottom",
+                     skin: "classic" };
+
+  // Skins — each is an html[data-theme=...] block in css/themes.css
+  const SKINS = ["classic", "dark", "solarized-light", "solarized-dark",
+                 "monokai", "matrix"];
+
+  function applySkin(skin) {
+    if (!SKINS.includes(skin)) skin = "classic";
+    settings.skin = skin;
+    document.documentElement.dataset.theme = skin;
+    try { localStorage.setItem("npp-skin", skin); } catch (e) {}
+    if (cm) cm.refresh();
+  }
 
   const $ = (sel) => document.querySelector(sel);
   const tabbar = $("#tabbar");
@@ -1768,6 +1789,9 @@
     $("#mi-wrap").classList.toggle("checked", settings.wrap);
     $("#mi-linenumbers").classList.toggle("checked", settings.lineNumbers);
     $("#tb-wrap").classList.toggle("on", settings.wrap);
+    document.querySelectorAll("#skin-menu .mi").forEach((mi) => {
+      mi.classList.toggle("checked", mi.dataset.skin === settings.skin);
+    });
     document.querySelectorAll("#language-menu .mi").forEach((mi) => {
       mi.classList.toggle("checked", activeTab && mi.dataset.lang === activeTab.lang.id);
     });
@@ -1801,7 +1825,14 @@
     });
     document.addEventListener("click", (e) => {
       const mi = e.target.closest(".mi[data-cmd]");
-      if (mi) { close(); runCommand(mi.dataset.cmd); }
+      if (mi && mi.dataset.cmd === "skin") {
+        close();
+        applySkin(mi.dataset.skin);
+        syncMenuChecks();
+        scheduleSessionSave();
+        if (!activeTab || activeTab.type !== "pdf") cm.focus();
+      }
+      else if (mi) { close(); runCommand(mi.dataset.cmd); }
       else if (e.target.closest("#language-menu .mi")) close();
     });
     document.querySelectorAll("#toolbar .tb").forEach((btn) => {
@@ -2037,8 +2068,15 @@
     if (isClassic()) document.body.classList.add("classic");
     if (!hasAI()) document.body.classList.add("no-ai");
     await restoreSession();
-    // Files the app was launched with (Finder "Open With", CLI args)
+    applySkin(settings.skin);   // session wins over the pre-boot localStorage guess
+    // Files the app was launched with (CLI args)
     for (const p of await backend.startupFiles()) await openPath(p);
+    // Files double-clicked in Finder open through this hook — both the ones
+    // queued while we booted (returned by uiReady) and any later ones.
+    window.__openExternal = async (paths) => {
+      for (const p of paths || []) await openPath(p);
+    };
+    for (const p of await backend.uiReady()) await openPath(p);
     cm.setOption("lineWrapping", settings.wrap);
     cm.setOption("lineNumbers", settings.lineNumbers);
     applyFontSize();

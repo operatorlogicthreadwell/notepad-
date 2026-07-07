@@ -5,6 +5,15 @@
 <title>Notepad--</title>
 <link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/themes.css">
+<script>
+/* Apply the saved skin before first paint so there's no white flash;
+   the session settings re-apply (and win) at boot. */
+try {
+  var s = localStorage.getItem("npp-skin");
+  if (s) document.documentElement.dataset.theme = s;
+} catch (e) {}
+</script>
 </head>
 <body>
 
@@ -58,6 +67,15 @@
       <div class="mi" data-cmd="zoomIn">Zoom In<span class="key">&#8984;+</span></div>
       <div class="mi" data-cmd="zoomOut">Zoom Out<span class="key">&#8984;&minus;</span></div>
       <div class="mi" data-cmd="zoomReset">Restore Default Zoom<span class="key">&#8984;0</span></div>
+      <div class="sep"></div>
+      <div id="skin-menu">
+        <div class="mi check" data-cmd="skin" data-skin="classic">Skin: Classic</div>
+        <div class="mi check" data-cmd="skin" data-skin="dark">Skin: Dark</div>
+        <div class="mi check" data-cmd="skin" data-skin="solarized-light">Skin: Solarized Light</div>
+        <div class="mi check" data-cmd="skin" data-skin="solarized-dark">Skin: Solarized Dark</div>
+        <div class="mi check" data-cmd="skin" data-skin="monokai">Skin: Monokai</div>
+        <div class="mi check" data-cmd="skin" data-skin="matrix">Skin: Matrix</div>
+      </div>
     </div>
   </div>
   <div class="menu" data-menu="language">Language
