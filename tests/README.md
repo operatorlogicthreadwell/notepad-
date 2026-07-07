@@ -31,6 +31,7 @@ CHROMIUM_PATH=/path/to/chromium node tests/browser/test_pdf.js    # PDF viewer: 
 CHROMIUM_PATH=/path/to/chromium node tests/browser/test_run.js    # run console: 7 tests
 CHROMIUM_PATH=/path/to/chromium node tests/browser/test_notes.js  # Apple Notes UI: 8 tests
 CHROMIUM_PATH=/path/to/chromium node tests/browser/test_torture.js # abuse/fuzz: 9 tests
+CHROMIUM_PATH=/path/to/chromium node tests/browser/test_features4.js # line ops, md preview, skins, tabs: 20 tests
 ```
 
 `CHROMIUM_PATH` defaults to the Claude Code container's preinstalled

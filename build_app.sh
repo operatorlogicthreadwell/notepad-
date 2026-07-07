@@ -10,12 +10,13 @@ python3 -m pip install --upgrade pywebview pyinstaller anthropic
 build_one() {
   local NAME="$1" ENTRY="$2" WITH_PDF="$3"
 
-  # --argv-emulation turns Finder "open with" events into argv entries so
-  # double-clicked files land in the editor at launch
+  # Finder "open with" / double-click is handled by the app itself via the
+  # kAEOpenDocuments Apple Event (see install_open_documents_handler in
+  # app.py) — it works at launch AND while the app is already running.
+  # (--argv-emulation only covered launch, flakily, so it's gone.)
   python3 -m PyInstaller \
     --noconfirm \
     --windowed \
-    --argv-emulation \
     --name "$NAME" \
     --add-data "ui:ui" \
     --osx-bundle-identifier "com.notepadminusminus.$(echo "$NAME" | tr -cd 'a-zA-Z')" \

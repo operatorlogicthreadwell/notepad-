@@ -36,6 +36,23 @@ the system WKWebView — so there's no bundled browser and the app stays small.
 - **Find & Replace** — with match-case and **regular expressions**
   (including `$1` capture groups in replacements), live match highlighting
   and match counts, wrap-around search
+- **Find in Files** — ⇧⌘F greps a whole folder (binary files and the usual
+  junk dirs skipped) into a results panel; click any hit to jump straight
+  to that file and line
+- **Line operations** — duplicate (⌘D), move up/down (⌥⌘↑/↓), delete
+  (⇧⌘K), join (⌘J), sort, UPPERCASE/lowercase, and comment/uncomment (⌘/)
+  aware of each language's comment syntax
+- **Multi-cursor editing** — ⌘-click to add cursors, ⌥-drag for
+  column/rectangle selection, and brackets/quotes auto-close as you type
+- **Markdown preview** — ⇧⌘M splits the editor with a live rendered
+  preview (headings, lists, code fences, quotes, links) for .md tabs
+- **Folder sidebar** — File → Open Folder… puts a collapsible file tree
+  beside the editor; click to open, drag its edge to resize
+- **Recent Files** — the File menu remembers your last 15 files
+- **Tabs, continued** — drag tabs to reorder them; ⌘1–⌘9 jumps to tab N;
+  drop files from Finder anywhere on the window to open them
+- **Disk watching** — if an open file changes on disk (a git pull, another
+  editor), Notepad-- notices within seconds and offers to reload it
 - **The classics** — line numbers, word wrap toggle, go-to-line, zoom,
   current-line highlight, bracket matching, line/column/selection status bar,
   Windows/Unix line-ending detection (preserved on save)
@@ -63,8 +80,20 @@ the system WKWebView — so there's no bundled browser and the app stays small.
   under Decide → AI Provider Settings (keys stored locally with 0600
   permissions; `pip3 install anthropic` and/or `openai`).
 - **Opens from Finder** — the built app registers itself for text, code,
-  and PDF files, so right-click → *Open With* → **Notepad--** works, and
-  double-clicked files open in the editor at launch
+  and PDF files, so right-click → *Open With* → **Notepad--** and setting
+  it as the default app both work. Double-clicked files open whether the
+  app is closed (launches with the file) or already running (the file
+  lands in a new tab and the window comes to the front) — handled via the
+  macOS open-documents Apple Event
+- **Skins** — six looks under View → Skin: **Classic** (the Notepad++
+  default), **Dark**, **Solarized Light**, **Solarized Dark**, **Monokai**,
+  and **Matrix** (black and phosphor green, glow included). A skin restyles
+  the whole app — menus, toolbar, tabs, editor and syntax colors — and is
+  remembered across sessions. **Skin: Custom…** creates
+  `~/Library/Application Support/Notepad--/custom-skin.css` where you can
+  override any palette variable to build your own
+- **Decide, on a selection** — Decide → Analyze Selection sends just the
+  highlighted text instead of the whole document
 - **Apple Notes** — *File → Open Apple Note…* lists your notes (filter-as-
   you-type), opens one as a tab, and ⌘S saves your edits back into Apple
   Notes; *Send Tab to Apple Notes* turns any tab into a new note. Uses

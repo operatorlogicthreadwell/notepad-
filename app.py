@@ -83,7 +83,7 @@ When the user asks a direct question instead, answer it plainly first, then add 
 the context needed to act on the answer."""
 
 
-# Files handed to us at launch (Finder "Open With" via argv-emulation, or CLI)
+# Files handed to us on the command line (python3 app.py somefile.txt)
 STARTUP_FILES = [a for a in sys.argv[1:] if not a.startswith("-") and os.path.isfile(a)]
 
 
@@ -103,9 +103,34 @@ class Api:
         self._proc = None
         self._proc_lock = threading.Lock()
         self._ai_busy = threading.Lock()
+        # Files from Finder (Apple "open documents" events). Events that
+        # arrive before the UI has booted are queued and handed over when
+        # the UI calls ui_ready().
+        self._files_lock = threading.Lock()
+        self._pending_files = []
+        self._ui_is_ready = False
 
     def get_startup_files(self):
         return STARTUP_FILES
+
+    def ui_ready(self):
+        """The UI finished booting: flush any queued Finder-opened files."""
+        with self._files_lock:
+            self._ui_is_ready = True
+            pending, self._pending_files = self._pending_files, []
+        return {"pending": pending}
+
+    def open_external(self, paths):
+        """Called from the macOS open-documents event handler (any time)."""
+        paths = [p for p in paths if os.path.isfile(p)]
+        if not paths:
+            return
+        with self._files_lock:
+            if not self._ui_is_ready:
+                self._pending_files.extend(paths)
+                return
+        self._emit_js("window.__openExternal && window.__openExternal(%s)"
+                      % json.dumps(paths))
 
     def get_edition(self):
         return {"edition": EDITION}
@@ -114,6 +139,12 @@ class Api:
     def open_dialog(self):
         paths = self.window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True)
         return [str(p) for p in paths] if paths else []
+
+    def folder_dialog(self):
+        paths = self.window.create_file_dialog(webview.FOLDER_DIALOG)
+        if isinstance(paths, (list, tuple)):
+            paths = paths[0] if paths else None
+        return str(paths) if paths else None
 
     def save_dialog(self, suggested_name="new 1.txt", directory=""):
         result = self.window.create_file_dialog(
@@ -237,6 +268,143 @@ class Api:
                     os.unlink(tmp)
                 except OSError:
                     pass
+
+    # ---- find in files ---------------------------------------------------
+    SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__",
+                 ".venv", "venv", "dist", "build", ".tox", ".cache"}
+    MAX_GREP_FILE = 2 * 1024 * 1024      # skip files over 2 MB
+    MAX_GREP_FILES = 20000               # give up on absurd trees
+    MAX_GREP_HITS = 1000
+
+    def find_in_files(self, root, query, case_sensitive=False, use_regex=False):
+        if not query:
+            return {"error": "Nothing to search for."}
+        root = os.path.expanduser(root or "")
+        if not os.path.isdir(root):
+            return {"error": "Not a folder: %s" % (root or "(empty)")}
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            rx = re.compile(query if use_regex else re.escape(query), flags)
+        except re.error as exc:
+            return {"error": "Bad regular expression: %s" % exc}
+
+        hits, files_scanned, files_matched = [], 0, 0
+        truncated = False
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames
+                                 if d not in self.SKIP_DIRS and not d.startswith("."))
+            for fname in sorted(filenames):
+                if fname.startswith("."):
+                    continue
+                path = os.path.join(dirpath, fname)
+                try:
+                    if os.path.getsize(path) > self.MAX_GREP_FILE:
+                        continue
+                    with open(path, "rb") as f:
+                        raw = f.read()
+                except OSError:
+                    continue
+                files_scanned += 1
+                if b"\x00" in raw[:8192]:
+                    continue                      # binary
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("latin-1")
+                matched = False
+                for lineno, line in enumerate(text.split("\n"), 1):
+                    if rx.search(line):
+                        matched = True
+                        hits.append({"path": path, "line": lineno,
+                                     "text": line.strip()[:400]})
+                        if len(hits) >= self.MAX_GREP_HITS:
+                            truncated = True
+                            break
+                if matched:
+                    files_matched += 1
+                if truncated or files_scanned >= self.MAX_GREP_FILES:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        return {"hits": hits, "files_scanned": files_scanned,
+                "files_matched": files_matched, "truncated": truncated}
+
+    # ---- folder sidebar ----------------------------------------------------
+    def list_dir(self, path):
+        path = os.path.expanduser(path or "")
+        if not os.path.isdir(path):
+            return {"error": "Not a folder: %s" % path}
+        entries = []
+        try:
+            names = os.listdir(path)
+        except OSError as exc:
+            return {"error": str(exc)}
+        for name in names:
+            if name.startswith("."):
+                continue
+            full = os.path.join(path, name)
+            entries.append({"name": name, "path": full,
+                            "dir": os.path.isdir(full)})
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        return {"entries": entries[:2000]}
+
+    # ---- on-disk change watching (UI polls every few seconds) --------------
+    def stat_mtimes(self, paths):
+        out = {}
+        for p in paths or []:
+            try:
+                out[p] = os.path.getmtime(p)
+            except OSError:
+                out[p] = None
+        return out
+
+    # ---- custom skin --------------------------------------------------------
+    CUSTOM_SKIN_TEMPLATE = """\
+/* Notepad-- custom skin.
+   Selecting View -> Skin: Custom loads this file. Override any of the
+   palette variables from ui/css/style.css here; the ones below are a
+   starting point (a teal take on the dark skin). Re-select Skin: Custom
+   after editing to reload. */
+html[data-theme="custom"] {
+  --chrome-bg: #1F2A2E;
+  --chrome-bg2: #24333A;
+  --chrome-border: #14090A;
+  --text: #D8E8E8;
+  --accent: #2AB5A5;
+  --editor-bg: #172226;
+  --editor-fg: #D8E8E8;
+  --caret: #2AB5A5;
+  --gutter-bg: #1C2A2F;
+  --linenum-fg: #5A7A7A;
+  --activeline-bg: #203137;
+  --selection-bg: rgba(42, 181, 165, .30);
+  --syn-keyword: #2AB5A5;
+  --syn-string: #C7A96B;
+  --syn-comment: #5A7A7A;
+  --syn-number: #A2C6A2;
+  --syn-def: #7FC7E8;
+}
+"""
+
+    def get_custom_skin(self):
+        path = os.path.join(data_dir(), "custom-skin.css")
+        created = False
+        if not os.path.exists(path):
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self.CUSTOM_SKIN_TEMPLATE)
+                created = True
+            except OSError as exc:
+                return {"error": str(exc)}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                css = f.read()
+        except OSError as exc:
+            return {"error": str(exc)}
+        if len(css) > 512 * 1024:
+            return {"error": "custom-skin.css is too large (max 512 KB)."}
+        return {"css": css, "path": path, "created": created}
 
     # ---- PDF annotations (sidecar storage keyed by file path) ------------
     def _annos_all(self):
@@ -680,6 +848,62 @@ JSON.stringify(out.slice(0, 500));
         return True
 
 
+def install_open_documents_handler(api):
+    """Receive files double-clicked in Finder, at launch AND while running.
+
+    PyInstaller's --argv-emulation only translates the open-documents Apple
+    Event into argv at process start — a file double-clicked while the app
+    was already running produced Finder's "cannot open files in the 'Text
+    Document' format" error, because NSApplication routes that event to the
+    app delegate's application:openFiles: and pywebview's delegate doesn't
+    implement it. (Registering a raw kAEOpenDocuments handler before launch
+    doesn't help: NSApplication installs its own during finishLaunching and
+    clobbers it.)
+
+    The fix is to graft application:openFiles: onto pywebview's own cocoa
+    AppDelegate class, which is the officially routed path. We also reply
+    "success" to macOS so the error dialog can never reappear.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc
+        import AppKit
+    except ImportError:
+        return  # pywebview's cocoa backend ships pyobjc; other envs won't
+
+    def open_paths(paths):
+        try:
+            api.open_external([str(p) for p in paths])
+            AppKit.NSApp.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass  # never let an error travel back into the Apple Event reply
+
+    def application_openFiles_(self, app_obj, filenames):
+        try:
+            open_paths(list(filenames))
+        finally:
+            try:
+                # NSApplicationDelegateReplySuccess = 0 — tells Launch
+                # Services the documents were opened
+                app_obj.replyToOpenOrPrint_(0)
+            except Exception:
+                pass
+
+    try:
+        from webview.platforms import cocoa as _cocoa
+        delegate_cls = _cocoa.BrowserView.AppDelegate
+        objc.classAddMethods(delegate_cls, [
+            objc.selector(application_openFiles_,
+                          selector=b"application:openFiles:",
+                          signature=b"v@:@@"),
+        ])
+    except Exception as exc:
+        # pywebview internals moved — better to run without Finder-open
+        # than to crash at startup
+        print("open-documents handler not installed:", exc, file=sys.stderr)
+
+
 def main():
     api = Api()
     window = webview.create_window(
@@ -692,6 +916,7 @@ def main():
         text_select=True,
     )
     api.window = window
+    install_open_documents_handler(api)
 
     # NOTE: do not call window.evaluate_js from the `closing` event — on macOS
     # it deadlocks the main thread and the app hangs on quit. The UI persists

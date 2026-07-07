@@ -120,6 +120,47 @@
       catch (e) { return []; }
     },
 
+    async folderDialog() {
+      if (!this.isShim && this.api.folder_dialog) return this.api.folder_dialog();
+      return null;   // browser demo has no folder access
+    },
+
+    async findInFiles(root, query, caseSensitive, useRegex) {
+      if (!this.isShim) return this.api.find_in_files(root, query, caseSensitive, useRegex);
+      return { error: "Find in Files needs the desktop app (python3 app.py)." };
+    },
+
+    async listDir(path) {
+      if (!this.isShim) return this.api.list_dir(path);
+      return { error: "The folder sidebar needs the desktop app." };
+    },
+
+    async statMtimes(paths) {
+      if (this.isShim || !this.api.stat_mtimes) return {};
+      try { return (await this.api.stat_mtimes(paths)) || {}; }
+      catch (e) { return {}; }
+    },
+
+    async customSkin() {
+      if (!this.isShim && this.api.get_custom_skin) return this.api.get_custom_skin();
+      // browser demo: keep a custom skin in localStorage so it's still testable
+      let css = localStorage.getItem("npp-custom-skin");
+      const created = css == null;
+      if (created) {
+        css = 'html[data-theme="custom"] { --accent: #2AB5A5; --tab-accent: #2AB5A5; }';
+        localStorage.setItem("npp-custom-skin", css);
+      }
+      return { css, path: "localStorage: npp-custom-skin", created };
+    },
+
+    // Tell the backend the UI can accept files; returns Finder-opened
+    // files that arrived while we were still booting.
+    async uiReady() {
+      if (this.isShim || !this.api.ui_ready) return [];
+      try { return (await this.api.ui_ready()).pending || []; }
+      catch (e) { return []; }
+    },
+
     async getEdition() {
       if (!this.isShim) {
         try { return (await this.api.get_edition()).edition || "ai"; }
@@ -247,12 +288,44 @@
   const isClassic = () => edition === "classic";
   const hasAI = () => edition === "ai";
   // Decide panel: AI edition only. Evolved extras (PDF/Notes): plus and AI.
-  const DECIDE_COMMANDS = ["aiAnalyze", "aiAsk", "aiSettings", "toggleInsight"];
+  const DECIDE_COMMANDS = ["aiAnalyze", "aiAnalyzeSelection", "aiAsk", "aiSettings", "toggleInsight"];
   const EVOLVED_COMMANDS = ["openNote", "sendToNotes", "pdfToText"];
   let untitledCounter = 0;
   let cm = null;
   const settings = { wrap: false, lineNumbers: true, fontSize: 13,
-                     consoleH: 190, consoleW: 420, consoleDock: "bottom" };
+                     consoleH: 190, consoleW: 420, consoleDock: "bottom",
+                     skin: "classic", recent: [], mdPreview: false,
+                     sidebarRoot: null, sidebarVisible: false, sidebarW: 230 };
+
+  // Skins — each is an html[data-theme=...] block in css/themes.css;
+  // "custom" loads user overrides from custom-skin.css in the app data dir
+  const SKINS = ["classic", "dark", "solarized-light", "solarized-dark",
+                 "monokai", "matrix", "custom"];
+
+  async function applySkin(skin, interactive = false) {
+    if (!SKINS.includes(skin)) skin = "classic";
+    if (skin === "custom") {
+      const res = await backend.customSkin();
+      if (res.error) { showAlert("Custom skin", res.error); return; }
+      let style = document.getElementById("custom-skin-style");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "custom-skin-style";
+        document.head.appendChild(style);
+      }
+      style.textContent = res.css;
+      if (interactive && res.created) {
+        showAlert("Custom skin created",
+          "A starter skin was written to:\n\n" + res.path +
+          "\n\nEdit it (any palette variable from ui/css/style.css can be " +
+          "overridden), then re-select View → Skin: Custom to reload.");
+      }
+    }
+    settings.skin = skin;
+    document.documentElement.dataset.theme = skin;
+    try { localStorage.setItem("npp-skin", skin); } catch (e) {}
+    if (cm) cm.refresh();
+  }
 
   const $ = (sel) => document.querySelector(sel);
   const tabbar = $("#tabbar");
@@ -268,9 +341,13 @@
       lineWrapping: settings.wrap,
       styleActiveLine: true,
       matchBrackets: true,
+      autoCloseBrackets: true,
       indentUnit: 4,
       tabSize: 4,
       viewportMargin: 20,
+      // ⌥-drag selects a rectangle (column mode); ⌘-click already adds
+      // cursors (CodeMirror multi-selection is on by default)
+      configureMouse: (cmi, repeat, e) => (e.altKey ? { unit: "rectangle" } : {}),
     });
     cm.on("changes", () => {
       if (!activeTab) return;
@@ -278,6 +355,7 @@
       updateStatus();
       scheduleSessionSave();
       scheduleOverlayUpdate();
+      scheduleMdPreview();
     });
     cm.on("cursorActivity", updateStatus);
   }
@@ -291,6 +369,7 @@
   // Tabs
   // ======================================================================
   let nextId = 1;
+  let dragTab = null;   // tab being dragged for reorder
 
   function newTab(opts = {}) {
     const lang = opts.lang || (opts.path ? langForPath(opts.path) : langById("text"));
@@ -345,6 +424,7 @@
     updateStatus();
     updateTitle();
     scheduleOverlayUpdate();
+    updateMdPreview();
     if (tab.type !== "pdf") cm.focus();
     scheduleSessionSave();
   }
@@ -403,6 +483,27 @@
         if (e.button === 1) { e.preventDefault(); closeTab(tab); }
         else if (e.button === 0) activateTab(tab);
       });
+      // drag to reorder
+      el.draggable = true;
+      el.addEventListener("dragstart", (e) => {
+        dragTab = tab;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", tab.name);   // required by some engines
+      });
+      el.addEventListener("dragover", (e) => {
+        if (dragTab && dragTab !== tab) e.preventDefault();
+      });
+      el.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (!dragTab || dragTab === tab) return;
+        const from = tabs.indexOf(dragTab), to = tabs.indexOf(tab);
+        if (from === -1 || to === -1) return;
+        tabs.splice(to, 0, tabs.splice(from, 1)[0]);
+        dragTab = null;
+        renderTabs();
+        scheduleSessionSave();
+      });
+      el.addEventListener("dragend", () => { dragTab = null; });
       tabbar.appendChild(el);
     }
     const act = tabbar.querySelector(".tab.active");
@@ -463,10 +564,12 @@
       const res = await backend.readFileB64(path);
       if (res.error) { showAlert("Open failed", res.error); return; }
       await openPdfBytes(base64ToBytes(res.data), path, path.split("/").pop());
+      noteRecent(path);
       return;
     }
     const res = await backend.readFile(path);
     if (res.error) { showAlert("Open failed", res.error); return; }
+    noteRecent(path);
     const tab = newTab({
       path,
       content: res.content.replace(/\r\n/g, "\n"),
@@ -530,6 +633,7 @@
     if (res.mtime != null) tab.mtime = res.mtime;
     tab.noteId = null;   // Save As onto disk detaches the tab from Apple Notes
     tab.path = path;
+    noteRecent(path);
     tab.name = path.split("/").pop();
     tab.lang = langForPath(path);
     if (tab === activeTab) cm.setOption("mode", tab.lang.mime);
@@ -1436,6 +1540,491 @@
   }
 
   // ======================================================================
+  // Line operations (Notepad++ Edit menu classics)
+  // ======================================================================
+  function primaryLineRange() {
+    const sel = cm.listSelections()[0];
+    const from = sel.from(), to = sel.to();
+    let a = from.line, b = to.line;
+    if (b > a && to.ch === 0) b--;   // full-line selections don't drag in the next line
+    return [a, b, from, to];
+  }
+
+  function duplicateLineOrSel() {
+    cm.operation(() => {
+      const sel = cm.listSelections()[0];
+      if (sel.empty()) {
+        const l = sel.head.line;
+        cm.replaceRange(cm.getLine(l) + "\n", { line: l, ch: 0 });
+      } else {
+        const text = cm.getRange(sel.from(), sel.to());
+        const at = sel.to();
+        cm.replaceRange(text, at, at);
+        cm.setSelection(sel.from(), at);
+      }
+    });
+  }
+
+  function moveLine(delta) {
+    const [a, b, from, to] = primaryLineRange();
+    if ((delta < 0 && a === 0) || (delta > 0 && b === cm.lastLine())) return;
+    cm.operation(() => {
+      const other = cm.getLine(delta < 0 ? a - 1 : b + 1);
+      const block = [];
+      for (let i = a; i <= b; i++) block.push(cm.getLine(i));
+      const start = { line: delta < 0 ? a - 1 : a, ch: 0 };
+      const endLine = delta < 0 ? b : b + 1;
+      const end = { line: endLine, ch: cm.getLine(endLine).length };
+      cm.replaceRange(delta < 0 ? block.join("\n") + "\n" + other
+                                : other + "\n" + block.join("\n"), start, end);
+      if (from.line === to.line && from.ch === to.ch) {
+        cm.setCursor({ line: from.line + delta, ch: from.ch });
+      } else {
+        cm.setSelection({ line: from.line + delta, ch: from.ch },
+                        { line: to.line + delta, ch: to.ch });
+      }
+    });
+  }
+
+  function joinLines() {
+    const [a, bIn] = primaryLineRange();
+    const b = bIn === a ? a + 1 : bIn;
+    if (b > cm.lastLine()) return;
+    cm.operation(() => {
+      const parts = [];
+      for (let i = a; i <= b; i++) {
+        parts.push(i === a ? cm.getLine(i).replace(/\s+$/, "")
+                           : cm.getLine(i).trim());
+      }
+      cm.replaceRange(parts.filter((p, i) => i === 0 || p).join(" "),
+                      { line: a, ch: 0 }, { line: b, ch: cm.getLine(b).length });
+    });
+  }
+
+  function sortLines() {
+    let [a, b] = primaryLineRange();
+    if (a === b) { a = 0; b = cm.lastLine(); }   // no block selected: sort the file
+    if (a >= b) return;
+    cm.operation(() => {
+      const lines = [];
+      for (let i = a; i <= b; i++) lines.push(cm.getLine(i));
+      lines.sort((x, y) => x.localeCompare(y));
+      cm.replaceRange(lines.join("\n"),
+                      { line: a, ch: 0 }, { line: b, ch: cm.getLine(b).length });
+      cm.setSelection({ line: a, ch: 0 }, { line: b, ch: cm.getLine(b).length });
+    });
+  }
+
+  function changeCase(upper) {
+    const sels = cm.getSelections();
+    if (sels.every((s) => !s)) return;
+    cm.replaceSelections(sels.map((s) => upper ? s.toUpperCase() : s.toLowerCase()),
+                         "around");
+  }
+
+  // ======================================================================
+  // Recent files
+  // ======================================================================
+  function noteRecent(path) {
+    if (!path) return;
+    const r = settings.recent = settings.recent || [];
+    const i = r.indexOf(path);
+    if (i >= 0) r.splice(i, 1);
+    r.unshift(path);
+    if (r.length > 15) r.length = 15;
+    scheduleSessionSave();
+  }
+
+  function buildRecentMenu() {
+    const menu = $("#recent-menu");
+    menu.textContent = "";
+    const recent = (settings.recent || []).filter(Boolean);
+    if (!recent.length) {
+      const mi = document.createElement("div");
+      mi.className = "mi";
+      mi.style.color = "var(--text-dim)";
+      mi.textContent = "No Recent Files";
+      menu.appendChild(mi);
+      return;
+    }
+    for (const p of recent) {
+      const mi = document.createElement("div");
+      mi.className = "mi";
+      mi.textContent = p.split("/").pop();
+      mi.title = p;
+      mi.addEventListener("click", () => openPath(p));
+      menu.appendChild(mi);
+    }
+    const clear = document.createElement("div");
+    clear.className = "mi";
+    clear.textContent = "Clear Recent Files";
+    clear.addEventListener("click", () => { settings.recent = []; scheduleSessionSave(); });
+    menu.appendChild(clear);
+  }
+
+  // ======================================================================
+  // Drag & drop files onto the window
+  // ======================================================================
+  function setupFileDrop() {
+    window.addEventListener("dragover", (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+        e.preventDefault();
+      }
+    });
+    window.addEventListener("drop", async (e) => {
+      if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+      e.preventDefault();
+      for (const f of Array.from(e.dataTransfer.files)) {
+        // pywebview exposes the real path on dropped files; browsers don't
+        const p = f.pywebviewFullPath || f.path;
+        if (p) { await openPath(p); continue; }
+        if (/\.pdf$/i.test(f.name)) {
+          if (!isClassic()) await openPdfBytes(new Uint8Array(await f.arrayBuffer()), null, f.name);
+          continue;
+        }
+        const text = await f.text();
+        newTab({ name: f.name, content: text, lang: langForPath(f.name),
+                 eol: detectEol(text) });
+      }
+    });
+  }
+
+  // ======================================================================
+  // Watch open files for on-disk changes (Notepad++-style reload prompt)
+  // ======================================================================
+  async function pollDiskChanges() {
+    if (!backdrop.classList.contains("hidden")) return;   // a dialog is up
+    const watch = tabs.filter((t) => t.path && t.type !== "pdf" && !t.noteId &&
+                                     t.mtime != null);
+    if (!watch.length) return;
+    const mtimes = await backend.statMtimes(watch.map((t) => t.path));
+    for (const t of watch) {
+      const disk = mtimes[t.path];
+      if (disk == null || Math.abs(disk - t.mtime) < 1e-6) continue;
+      if (t.promptedMtime === disk) continue;   // already asked about this change
+      t.promptedMtime = disk;
+      const dirty = isDirty(t);
+      const choice = await showConfirm("File changed on disk",
+        '"' + t.name + '" was modified by another program.' +
+        (dirty ? " You also have unsaved changes in this tab." : "") +
+        " Reload it from disk?",
+        [{ label: "Reload", value: "reload" }, { label: "Keep Mine", value: "keep" }],
+        "keep");
+      if (choice === "reload") {
+        const res = await backend.readFile(t.path);
+        if (res.error) { showAlert("Reload failed", res.error); continue; }
+        t.doc.setValue(res.content.replace(/\r\n/g, "\n"));
+        t.encoding = res.encoding;
+        t.eol = detectEol(res.content);
+        t.mtime = res.mtime;
+        t.forceDirty = false;
+        t.cleanGen = t.doc.changeGeneration();
+        renderTabs();
+        if (t === activeTab) { updateStatus(); scheduleMdPreview(); }
+        scheduleSessionSave();
+      }
+      break;   // one prompt per poll tick
+    }
+  }
+
+  // ======================================================================
+  // Markdown preview
+  // ======================================================================
+  const mdpreviewEl = document.getElementById("mdpreview");
+  let mdTimer = null;
+
+  function isMarkdownTab(t) { return t && t.type !== "pdf" && t.lang.id === "markdown"; }
+
+  function renderMarkdownFull(md) {
+    const out = [];
+    let listTag = null, inCode = false, codeBuf = [], inQuote = false;
+    const inline = (s) => escapeHtml(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>")
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+    const closeList = () => { if (listTag) { out.push("</" + listTag + ">"); listTag = null; } };
+    const closeQuote = () => { if (inQuote) { out.push("</blockquote>"); inQuote = false; } };
+    for (const raw of md.split("\n")) {
+      if (/^\s*```/.test(raw)) {
+        if (inCode) {
+          out.push("<pre><code>" + escapeHtml(codeBuf.join("\n")) + "</code></pre>");
+          codeBuf = [];
+          inCode = false;
+        } else { closeList(); closeQuote(); inCode = true; }
+        continue;
+      }
+      if (inCode) { codeBuf.push(raw); continue; }
+      const h = raw.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        closeList(); closeQuote();
+        const lv = Math.min(h[1].length, 3);
+        out.push("<h" + lv + ">" + inline(h[2]) + "</h" + lv + ">");
+        continue;
+      }
+      if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(raw)) {
+        closeList(); closeQuote();
+        out.push("<hr>");
+        continue;
+      }
+      const q = raw.match(/^\s*>\s?(.*)$/);
+      if (q) {
+        closeList();
+        if (!inQuote) { out.push("<blockquote>"); inQuote = true; }
+        out.push("<p>" + inline(q[1]) + "</p>");
+        continue;
+      }
+      closeQuote();
+      const ul = raw.match(/^\s*[-*+]\s+(.*)$/);
+      const ol = raw.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ul || ol) {
+        const tag = ul ? "ul" : "ol";
+        if (listTag !== tag) { closeList(); out.push("<" + tag + ">"); listTag = tag; }
+        out.push("<li>" + inline((ul || ol)[1]) + "</li>");
+        continue;
+      }
+      closeList();
+      if (raw.trim()) out.push("<p>" + inline(raw) + "</p>");
+    }
+    if (inCode) out.push("<pre><code>" + escapeHtml(codeBuf.join("\n")) + "</code></pre>");
+    closeList(); closeQuote();
+    return out.join("");
+  }
+
+  function updateMdPreview() {
+    const show = settings.mdPreview && isMarkdownTab(activeTab);
+    mdpreviewEl.classList.toggle("hidden", !show);
+    if (show) mdpreviewEl.innerHTML = renderMarkdownFull(activeTab.doc.getValue());
+    cm.refresh();
+  }
+
+  function scheduleMdPreview() {
+    if (!settings.mdPreview) return;
+    clearTimeout(mdTimer);
+    mdTimer = setTimeout(updateMdPreview, 300);
+  }
+
+  // ======================================================================
+  // Folder sidebar
+  // ======================================================================
+  const sidebarEl = document.getElementById("sidebar");
+  const sidebarTree = document.getElementById("sidebar-tree");
+  const sidebarTitle = document.getElementById("sidebar-title");
+  const expandedDirs = new Set();
+
+  function showSidebar(show) {
+    sidebarEl.classList.toggle("hidden", !show);
+    settings.sidebarVisible = show;
+    sidebarEl.style.width = Math.max(160, settings.sidebarW || 230) + "px";
+    cm.refresh();
+  }
+
+  async function openFolder() {
+    const p = await backend.folderDialog();
+    if (!p) {
+      if (backend.isShim) showAlert("Open Folder", "The folder sidebar needs the desktop app (python3 app.py).");
+      return;
+    }
+    settings.sidebarRoot = p;
+    expandedDirs.clear();
+    expandedDirs.add(p);
+    showSidebar(true);
+    await renderSidebar();
+    scheduleSessionSave();
+  }
+
+  async function renderSidebar() {
+    const root = settings.sidebarRoot;
+    sidebarTree.textContent = "";
+    if (!root) {
+      sidebarTree.innerHTML = '<div class="tree-empty">File → Open Folder…\nto browse a project here.</div>';
+      sidebarTitle.textContent = "Folder";
+      return;
+    }
+    sidebarTitle.textContent = root.split("/").pop() || root;
+    sidebarTitle.title = root;
+    await renderDirInto(sidebarTree, root, 0);
+  }
+
+  async function renderDirInto(container, dir, depth) {
+    const res = await backend.listDir(dir);
+    if (res.error) {
+      container.innerHTML = '<div class="tree-empty">' + escapeHtml(res.error) + "</div>";
+      return;
+    }
+    for (const entry of res.entries) {
+      const row = document.createElement("div");
+      row.className = "tree-row";
+      row.style.paddingLeft = 6 + depth * 14 + "px";
+      row.title = entry.path;
+      const twisty = document.createElement("span");
+      twisty.className = "twisty";
+      twisty.textContent = entry.dir ? (expandedDirs.has(entry.path) ? "▾" : "▸") : "";
+      const icon = document.createElement("span");
+      icon.className = "ticon";
+      icon.textContent = entry.dir ? "📁" : "📄";
+      const name = document.createElement("span");
+      name.textContent = entry.name;
+      name.style.overflow = "hidden";
+      name.style.textOverflow = "ellipsis";
+      row.append(twisty, icon, name);
+      row.addEventListener("click", () => {
+        if (entry.dir) {
+          if (expandedDirs.has(entry.path)) expandedDirs.delete(entry.path);
+          else expandedDirs.add(entry.path);
+          renderSidebar();
+        } else {
+          sidebarTree.querySelectorAll(".tree-row.active")
+            .forEach((r) => r.classList.remove("active"));
+          row.classList.add("active");
+          openPath(entry.path);
+        }
+      });
+      container.appendChild(row);
+      if (entry.dir && expandedDirs.has(entry.path)) {
+        const childBox = document.createElement("div");
+        container.appendChild(childBox);
+        await renderDirInto(childBox, entry.path, depth + 1);
+      }
+    }
+    if (!res.entries.length && depth === 0) {
+      container.innerHTML = '<div class="tree-empty">(empty folder)</div>';
+    }
+  }
+
+  function setupSidebar() {
+    document.getElementById("sidebar-close").addEventListener("click", () => {
+      showSidebar(false);
+      scheduleSessionSave();
+    });
+    document.getElementById("sidebar-refresh").addEventListener("click", renderSidebar);
+    const resizer = document.getElementById("sidebar-resizer");
+    resizer.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX, startW = sidebarEl.offsetWidth;
+      const move = (ev) => {
+        settings.sidebarW = Math.min(Math.max(startW + (ev.clientX - startX), 160),
+                                     window.innerWidth - 400);
+        sidebarEl.style.width = settings.sidebarW + "px";
+      };
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        cm.refresh();
+        scheduleSessionSave();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  // ======================================================================
+  // Find in Files
+  // ======================================================================
+  const fifEl = document.getElementById("fifresults");
+  const fifOut = document.getElementById("fif-out");
+  const fifStatus = document.getElementById("fif-status");
+  let lastFifDir = null;
+
+  function findInFilesDialog() {
+    if (backend.isShim) {
+      showAlert("Find in Files", "Find in Files needs the desktop app (python3 app.py).");
+      return;
+    }
+    const defDir = lastFifDir || settings.sidebarRoot ||
+      (activeTab && activeTab.path ? activeTab.path.replace(/\/[^/]*$/, "") : "~");
+    showModal("Find in Files",
+      "<label>Find :</label><input id=\"fif-q\" type=\"text\" spellcheck=\"false\">" +
+      "<label style=\"display:block;margin-top:8px\">In folder :</label>" +
+      "<input id=\"fif-dir\" type=\"text\" spellcheck=\"false\">" +
+      "<div style=\"margin-top:8px\">" +
+      "<label style=\"display:inline-flex;align-items:center;gap:3px\">" +
+      "<input id=\"fif-case\" type=\"checkbox\">Match case</label>" +
+      "<label style=\"display:inline-flex;align-items:center;gap:3px;margin-left:14px\">" +
+      "<input id=\"fif-regex\" type=\"checkbox\">Regex</label></div>",
+      [{ label: "Search", onClick: doSearch }, { label: "Cancel" }]);
+    const q = document.getElementById("fif-q");
+    document.getElementById("fif-dir").value = defDir;
+    q.value = cm.getSelection() || findInput.value || "";
+    q.focus();
+    q.select();
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); hideModal(); doSearch(); }
+    });
+
+    async function doSearch() {
+      const g = (id) => {
+        const el = document.getElementById(id);
+        return el ? (el.type === "checkbox" ? el.checked : el.value) : "";
+      };
+      const query = String(g("fif-q")).trim();
+      const dir = String(g("fif-dir")).trim();
+      if (!query || !dir) return;
+      lastFifDir = dir;
+      fifEl.classList.remove("hidden");
+      fifOut.textContent = "";
+      fifStatus.textContent = "searching…";
+      cm.refresh();
+      const res = await backend.findInFiles(dir, query, !!g("fif-case"), !!g("fif-regex"));
+      if (res.error) {
+        fifStatus.textContent = "";
+        fifOut.innerHTML = '<div class="tree-empty">' + escapeHtml(res.error) + "</div>";
+        return;
+      }
+      renderFifResults(res);
+    }
+  }
+
+  function renderFifResults(res) {
+    fifStatus.textContent = res.hits.length + " hits in " + res.files_matched +
+      " files (" + res.files_scanned + " scanned" +
+      (res.truncated ? ", results truncated" : "") + ")";
+    fifOut.textContent = "";
+    if (!res.hits.length) {
+      fifOut.innerHTML = '<div class="tree-empty">No matches.</div>';
+      return;
+    }
+    let lastPath = null;
+    for (const hit of res.hits) {
+      if (hit.path !== lastPath) {
+        lastPath = hit.path;
+        const f = document.createElement("div");
+        f.className = "fif-file";
+        f.textContent = hit.path;
+        f.title = hit.path;
+        fifOut.appendChild(f);
+      }
+      const row = document.createElement("div");
+      row.className = "fif-hit";
+      row.title = hit.path + ":" + hit.line;
+      const ln = document.createElement("span");
+      ln.className = "fif-ln";
+      ln.textContent = hit.line;
+      const tx = document.createElement("span");
+      tx.className = "fif-text";
+      tx.textContent = hit.text;
+      row.append(ln, tx);
+      row.addEventListener("click", async () => {
+        await openPath(hit.path);
+        if (activeTab && activeTab.path === hit.path && activeTab.type !== "pdf") {
+          const line = Math.min(hit.line - 1, cm.lineCount() - 1);
+          cm.setCursor({ line, ch: 0 });
+          cm.scrollIntoView({ line, ch: 0 }, 80);
+          cm.focus();
+        }
+      });
+      fifOut.appendChild(row);
+    }
+  }
+
+  function setupFindInFiles() {
+    document.getElementById("fif-close").addEventListener("click", () => {
+      fifEl.classList.add("hidden");
+      cm.refresh();
+    });
+  }
+
+  // ======================================================================
   // Run console
   // ======================================================================
   const consoleEl = document.getElementById("console");
@@ -1655,9 +2244,9 @@
     return tab.doc.getValue();
   }
 
-  async function runAnalysis(question) {
+  async function runAnalysis(question, textOverride) {
     if (aiRunning) { setAiStatus("already running…", "run"); return; }
-    const text = await activeDocumentText();
+    const text = textOverride != null ? textOverride : await activeDocumentText();
     if (!text || !text.trim()) {
       showAlert("Decide", "The current tab is empty — open or write a document first.");
       return;
@@ -1761,13 +2350,20 @@
     activeTab.lang = lang;
     cm.setOption("mode", lang.mime);
     updateStatus();
+    updateMdPreview();
     scheduleSessionSave();
   }
 
   function syncMenuChecks() {
     $("#mi-wrap").classList.toggle("checked", settings.wrap);
     $("#mi-linenumbers").classList.toggle("checked", settings.lineNumbers);
+    $("#mi-sidebar").classList.toggle("checked", !sidebarEl.classList.contains("hidden"));
+    $("#mi-mdpreview").classList.toggle("checked", settings.mdPreview);
+    buildRecentMenu();
     $("#tb-wrap").classList.toggle("on", settings.wrap);
+    document.querySelectorAll("#skin-menu .mi").forEach((mi) => {
+      mi.classList.toggle("checked", mi.dataset.skin === settings.skin);
+    });
     document.querySelectorAll("#language-menu .mi").forEach((mi) => {
       mi.classList.toggle("checked", activeTab && mi.dataset.lang === activeTab.lang.id);
     });
@@ -1801,8 +2397,15 @@
     });
     document.addEventListener("click", (e) => {
       const mi = e.target.closest(".mi[data-cmd]");
-      if (mi) { close(); runCommand(mi.dataset.cmd); }
-      else if (e.target.closest("#language-menu .mi")) close();
+      if (mi && mi.dataset.cmd === "skin") {
+        close();
+        applySkin(mi.dataset.skin, true);
+        syncMenuChecks();
+        scheduleSessionSave();
+        if (!activeTab || activeTab.type !== "pdf") cm.focus();
+      }
+      else if (mi) { close(); runCommand(mi.dataset.cmd); }
+      else if (e.target.closest(".dropdown .mi")) close();   // language + recent items
     });
     document.querySelectorAll("#toolbar .tb").forEach((btn) => {
       btn.addEventListener("click", () => runCommand(btn.dataset.cmd));
@@ -1916,7 +2519,9 @@
     const isPdf = activeTab && activeTab.type === "pdf";
     if (isPdf) {
       // Editor-only commands are no-ops on a read-only PDF tab
-      if (["undo", "redo", "cut", "paste", "selectAll", "toggleWrap", "toggleLineNumbers"].includes(cmd)) return;
+      if (["undo", "redo", "cut", "paste", "selectAll", "toggleWrap", "toggleLineNumbers",
+           "duplicateLine", "moveLineUp", "moveLineDown", "deleteLine", "joinLines",
+           "toggleComment", "sortLines", "upperCase", "lowerCase", "toggleMdPreview"].includes(cmd)) return;
       if (cmd === "copy") {
         const sel = String(window.getSelection());
         if (sel) navigator.clipboard.writeText(sel).catch(() => {});
@@ -1950,6 +2555,33 @@
       findNext: () => findStep(false),
       findPrev: () => findStep(true),
       gotoLine: gotoLineDialog,
+      findInFiles: findInFilesDialog,
+      openFolder,
+      duplicateLine: duplicateLineOrSel,
+      moveLineUp: () => moveLine(-1),
+      moveLineDown: () => moveLine(1),
+      deleteLine: () => cm.execCommand("deleteLine"),
+      joinLines,
+      sortLines,
+      upperCase: () => changeCase(true),
+      lowerCase: () => changeCase(false),
+      toggleComment: () => cm.toggleComment({ indent: true }),
+      toggleSidebar: () => {
+        if (!settings.sidebarRoot) { openFolder(); return; }
+        showSidebar(sidebarEl.classList.contains("hidden"));
+        if (settings.sidebarVisible) renderSidebar();
+        scheduleSessionSave();
+      },
+      toggleMdPreview: () => {
+        settings.mdPreview = !settings.mdPreview;
+        if (settings.mdPreview && activeTab && !isMarkdownTab(activeTab)) {
+          showAlert("Markdown Preview",
+            "The preview pane shows Markdown tabs — it will appear when a .md tab is active.");
+        }
+        updateMdPreview();
+        syncMenuChecks();
+        scheduleSessionSave();
+      },
       toggleWrap: () => {
         settings.wrap = !settings.wrap;
         cm.setOption("lineWrapping", settings.wrap);
@@ -1973,6 +2605,15 @@
       runStop: () => backend.runStop(),
       toggleConsole: () => showConsole(consoleEl.classList.contains("hidden")),
       aiAnalyze: () => runAnalysis(null),
+      aiAnalyzeSelection: () => {
+        const sel = activeTab && activeTab.type === "pdf"
+          ? String(window.getSelection()) : cm.getSelection();
+        if (!sel || !sel.trim()) {
+          showAlert("Decide", "Select some text first, then Analyze Selection.");
+          return;
+        }
+        runAnalysis(null, sel);
+      },
       aiAsk: () => { showInsight(true); insightQ.focus(); },
       aiSettings: aiSettingsDialog,
       toggleInsight: () => showInsight(insightEl.classList.contains("hidden")),
@@ -1991,16 +2632,29 @@
         if (!findbar.classList.contains("hidden")) { hideFindbar(); e.preventDefault(); return; }
       }
       if (!mod) return;
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        runCommand(e.key === "ArrowUp" ? "moveLineUp" : "moveLineDown");
+        return;
+      }
+      if (/^[1-9]$/.test(e.key) && !e.shiftKey && !e.altKey) {   // ⌘1–9 → tab N
+        const t = tabs[+e.key - 1];
+        if (t) { e.preventDefault(); activateTab(t); }
+        return;
+      }
       const k = e.key.toLowerCase();
       const map = {
         n: "new", o: "open", w: "closeTab", g: e.shiftKey ? "findPrev" : "findNext",
         l: "gotoLine", "=": "zoomIn", "+": "zoomIn", "-": "zoomOut", "0": "zoomReset",
+        d: "duplicateLine", j: "joinLines", "/": "toggleComment",
       };
       let cmd = null;
       if (k === "s") cmd = e.shiftKey ? "saveAs" : "save";
-      else if (k === "f") cmd = e.altKey ? "replace" : "find";
+      else if (k === "f") cmd = e.shiftKey ? "findInFiles" : (e.altKey ? "replace" : "find");
       else if (k === "r") cmd = e.shiftKey ? "runShellCommand" : "runFile";
       else if (k === "a" && e.shiftKey) cmd = "aiAnalyze";
+      else if (k === "k" && e.shiftKey) cmd = "deleteLine";
+      else if (k === "m" && e.shiftKey) cmd = "toggleMdPreview";
       else if (map[k] && !(k === "n" && e.shiftKey)) cmd = map[k];
       if (cmd) { e.preventDefault(); runCommand(cmd); }
     });
@@ -2032,16 +2686,33 @@
     setupPdfToolbar();
     setupConsole();
     setupInsight();
+    setupSidebar();
+    setupFindInFiles();
+    setupFileDrop();
     await backend.init();
     edition = await backend.getEdition();
     if (isClassic()) document.body.classList.add("classic");
     if (!hasAI()) document.body.classList.add("no-ai");
     await restoreSession();
-    // Files the app was launched with (Finder "Open With", CLI args)
+    applySkin(settings.skin);   // session wins over the pre-boot localStorage guess
+    // Files the app was launched with (CLI args)
     for (const p of await backend.startupFiles()) await openPath(p);
+    // Files double-clicked in Finder open through this hook — both the ones
+    // queued while we booted (returned by uiReady) and any later ones.
+    window.__openExternal = async (paths) => {
+      for (const p of paths || []) await openPath(p);
+    };
+    for (const p of await backend.uiReady()) await openPath(p);
     cm.setOption("lineWrapping", settings.wrap);
     cm.setOption("lineNumbers", settings.lineNumbers);
     applyFontSize();
+    if (settings.sidebarVisible && settings.sidebarRoot) {
+      expandedDirs.add(settings.sidebarRoot);
+      showSidebar(true);
+      renderSidebar();   // async fill; no need to block boot on it
+    }
+    updateMdPreview();
+    if (!backend.isShim) setInterval(pollDiskChanges, 4000);
     syncMenuChecks();
     updateStatus();
     cm.focus();
