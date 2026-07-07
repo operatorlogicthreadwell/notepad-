@@ -36,6 +36,23 @@ the system WKWebView — so there's no bundled browser and the app stays small.
 - **Find & Replace** — with match-case and **regular expressions**
   (including `$1` capture groups in replacements), live match highlighting
   and match counts, wrap-around search
+- **Find in Files** — ⇧⌘F greps a whole folder (binary files and the usual
+  junk dirs skipped) into a results panel; click any hit to jump straight
+  to that file and line
+- **Line operations** — duplicate (⌘D), move up/down (⌥⌘↑/↓), delete
+  (⇧⌘K), join (⌘J), sort, UPPERCASE/lowercase, and comment/uncomment (⌘/)
+  aware of each language's comment syntax
+- **Multi-cursor editing** — ⌘-click to add cursors, ⌥-drag for
+  column/rectangle selection, and brackets/quotes auto-close as you type
+- **Markdown preview** — ⇧⌘M splits the editor with a live rendered
+  preview (headings, lists, code fences, quotes, links) for .md tabs
+- **Folder sidebar** — File → Open Folder… puts a collapsible file tree
+  beside the editor; click to open, drag its edge to resize
+- **Recent Files** — the File menu remembers your last 15 files
+- **Tabs, continued** — drag tabs to reorder them; ⌘1–⌘9 jumps to tab N;
+  drop files from Finder anywhere on the window to open them
+- **Disk watching** — if an open file changes on disk (a git pull, another
+  editor), Notepad-- notices within seconds and offers to reload it
 - **The classics** — line numbers, word wrap toggle, go-to-line, zoom,
   current-line highlight, bracket matching, line/column/selection status bar,
   Windows/Unix line-ending detection (preserved on save)
@@ -72,7 +89,11 @@ the system WKWebView — so there's no bundled browser and the app stays small.
   default), **Dark**, **Solarized Light**, **Solarized Dark**, **Monokai**,
   and **Matrix** (black and phosphor green, glow included). A skin restyles
   the whole app — menus, toolbar, tabs, editor and syntax colors — and is
-  remembered across sessions
+  remembered across sessions. **Skin: Custom…** creates
+  `~/Library/Application Support/Notepad--/custom-skin.css` where you can
+  override any palette variable to build your own
+- **Decide, on a selection** — Decide → Analyze Selection sends just the
+  highlighted text instead of the whole document
 - **Apple Notes** — *File → Open Apple Note…* lists your notes (filter-as-
   you-type), opens one as a tab, and ⌘S saves your edits back into Apple
   Notes; *Send Tab to Apple Notes* turns any tab into a new note. Uses

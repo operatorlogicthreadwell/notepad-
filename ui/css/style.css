@@ -752,3 +752,180 @@ body.classic #pdf-container {
 .note-folder { color: var(--key-fg); font-size: 12px; flex: 0 0 auto; }
 .note-row:hover .note-folder { color: var(--key-hover-fg); }
 .note-empty { padding: 14px; color: var(--text-dim); text-align: center; white-space: pre-wrap; }
+
+/* ===== Folder sidebar ===== */
+#sidebar {
+  flex: 0 0 auto;
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--tabbar-border);
+}
+#sidebar-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--chrome-bg2);
+  border-bottom: 1px solid var(--chrome-border2);
+  padding: 3px 8px;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+#sidebar-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+#sidebar-bar button {
+  padding: 1px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 12px;
+}
+#sidebar-bar button:hover { border-color: var(--accent); }
+#sidebar-tree {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-row:hover { background: var(--hover-soft-bg); }
+.tree-row.active { background: var(--mi-hover-bg); color: var(--mi-hover-fg); }
+.tree-row .twisty { width: 12px; flex: 0 0 auto; text-align: center; color: var(--text-dim); }
+.tree-row .ticon { flex: 0 0 auto; }
+.tree-empty { padding: 14px; color: var(--text-dim); text-align: center; white-space: pre-wrap; }
+#sidebar-resizer {
+  position: absolute;
+  top: 0; bottom: 0; right: -3px;
+  width: 7px;
+  cursor: ew-resize;
+  z-index: 10;
+}
+#sidebar-resizer:hover { background: rgba(49, 106, 197, .35); }
+
+/* ===== Editor + markdown preview split ===== */
+#editor-row {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+#editor-container { min-width: 0; }
+#mdpreview {
+  flex: 0 0 45%;
+  min-width: 0;
+  overflow: auto;
+  border-left: 1px solid var(--tabbar-border);
+  background: var(--editor-bg);
+  color: var(--editor-fg);
+  padding: 12px 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+#mdpreview h1, #mdpreview h2, #mdpreview h3 { margin: 14px 0 6px; color: var(--syn-header); }
+#mdpreview h1 { font-size: 20px; border-bottom: 1px solid var(--panel-border); padding-bottom: 4px; }
+#mdpreview h2 { font-size: 17px; }
+#mdpreview h3 { font-size: 14px; }
+#mdpreview p { margin: 6px 0; }
+#mdpreview ul, #mdpreview ol { margin: 4px 0 8px 24px; }
+#mdpreview code {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--gutter-bg);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+#mdpreview pre {
+  background: var(--gutter-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+#mdpreview pre code { background: none; padding: 0; }
+#mdpreview blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 8px 0;
+  padding: 2px 12px;
+  color: var(--text-dim);
+}
+#mdpreview a { color: var(--syn-link); }
+#mdpreview hr { border: none; border-top: 1px solid var(--panel-border); margin: 12px 0; }
+
+/* ===== Find in Files results ===== */
+#fifresults {
+  flex: 0 0 auto;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--tabbar-border);
+  background: var(--panel-bg);
+}
+#fif-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--chrome-bg2);
+  border-bottom: 1px solid var(--chrome-border2);
+  padding: 3px 8px;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+#fif-title { font-weight: 600; }
+#fif-status { color: var(--text-dim); flex: 1 1 auto; }
+#fif-bar button {
+  padding: 1px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 12px;
+}
+#fif-bar button:hover { border-color: var(--accent); }
+#fif-out {
+  flex: 1 1 auto;
+  overflow: auto;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 0;
+}
+.fif-file {
+  padding: 3px 8px;
+  font-weight: 600;
+  color: var(--syn-header);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fif-hit {
+  display: flex;
+  gap: 8px;
+  padding: 1px 8px 1px 22px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fif-hit:hover { background: var(--hover-soft-bg); }
+.fif-hit .fif-ln { color: var(--text-dim); flex: 0 0 auto; min-width: 34px; text-align: right; }
+.fif-hit .fif-text { overflow: hidden; text-overflow: ellipsis; }
+.fif-hit .fif-text b { color: var(--search-outline); font-weight: 700; }

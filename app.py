@@ -140,6 +140,12 @@ class Api:
         paths = self.window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True)
         return [str(p) for p in paths] if paths else []
 
+    def folder_dialog(self):
+        paths = self.window.create_file_dialog(webview.FOLDER_DIALOG)
+        if isinstance(paths, (list, tuple)):
+            paths = paths[0] if paths else None
+        return str(paths) if paths else None
+
     def save_dialog(self, suggested_name="new 1.txt", directory=""):
         result = self.window.create_file_dialog(
             webview.SAVE_DIALOG, save_filename=suggested_name, directory=directory or ""
@@ -262,6 +268,143 @@ class Api:
                     os.unlink(tmp)
                 except OSError:
                     pass
+
+    # ---- find in files ---------------------------------------------------
+    SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__",
+                 ".venv", "venv", "dist", "build", ".tox", ".cache"}
+    MAX_GREP_FILE = 2 * 1024 * 1024      # skip files over 2 MB
+    MAX_GREP_FILES = 20000               # give up on absurd trees
+    MAX_GREP_HITS = 1000
+
+    def find_in_files(self, root, query, case_sensitive=False, use_regex=False):
+        if not query:
+            return {"error": "Nothing to search for."}
+        root = os.path.expanduser(root or "")
+        if not os.path.isdir(root):
+            return {"error": "Not a folder: %s" % (root or "(empty)")}
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            rx = re.compile(query if use_regex else re.escape(query), flags)
+        except re.error as exc:
+            return {"error": "Bad regular expression: %s" % exc}
+
+        hits, files_scanned, files_matched = [], 0, 0
+        truncated = False
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames
+                                 if d not in self.SKIP_DIRS and not d.startswith("."))
+            for fname in sorted(filenames):
+                if fname.startswith("."):
+                    continue
+                path = os.path.join(dirpath, fname)
+                try:
+                    if os.path.getsize(path) > self.MAX_GREP_FILE:
+                        continue
+                    with open(path, "rb") as f:
+                        raw = f.read()
+                except OSError:
+                    continue
+                files_scanned += 1
+                if b"\x00" in raw[:8192]:
+                    continue                      # binary
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("latin-1")
+                matched = False
+                for lineno, line in enumerate(text.split("\n"), 1):
+                    if rx.search(line):
+                        matched = True
+                        hits.append({"path": path, "line": lineno,
+                                     "text": line.strip()[:400]})
+                        if len(hits) >= self.MAX_GREP_HITS:
+                            truncated = True
+                            break
+                if matched:
+                    files_matched += 1
+                if truncated or files_scanned >= self.MAX_GREP_FILES:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        return {"hits": hits, "files_scanned": files_scanned,
+                "files_matched": files_matched, "truncated": truncated}
+
+    # ---- folder sidebar ----------------------------------------------------
+    def list_dir(self, path):
+        path = os.path.expanduser(path or "")
+        if not os.path.isdir(path):
+            return {"error": "Not a folder: %s" % path}
+        entries = []
+        try:
+            names = os.listdir(path)
+        except OSError as exc:
+            return {"error": str(exc)}
+        for name in names:
+            if name.startswith("."):
+                continue
+            full = os.path.join(path, name)
+            entries.append({"name": name, "path": full,
+                            "dir": os.path.isdir(full)})
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        return {"entries": entries[:2000]}
+
+    # ---- on-disk change watching (UI polls every few seconds) --------------
+    def stat_mtimes(self, paths):
+        out = {}
+        for p in paths or []:
+            try:
+                out[p] = os.path.getmtime(p)
+            except OSError:
+                out[p] = None
+        return out
+
+    # ---- custom skin --------------------------------------------------------
+    CUSTOM_SKIN_TEMPLATE = """\
+/* Notepad-- custom skin.
+   Selecting View -> Skin: Custom loads this file. Override any of the
+   palette variables from ui/css/style.css here; the ones below are a
+   starting point (a teal take on the dark skin). Re-select Skin: Custom
+   after editing to reload. */
+html[data-theme="custom"] {
+  --chrome-bg: #1F2A2E;
+  --chrome-bg2: #24333A;
+  --chrome-border: #14090A;
+  --text: #D8E8E8;
+  --accent: #2AB5A5;
+  --editor-bg: #172226;
+  --editor-fg: #D8E8E8;
+  --caret: #2AB5A5;
+  --gutter-bg: #1C2A2F;
+  --linenum-fg: #5A7A7A;
+  --activeline-bg: #203137;
+  --selection-bg: rgba(42, 181, 165, .30);
+  --syn-keyword: #2AB5A5;
+  --syn-string: #C7A96B;
+  --syn-comment: #5A7A7A;
+  --syn-number: #A2C6A2;
+  --syn-def: #7FC7E8;
+}
+"""
+
+    def get_custom_skin(self):
+        path = os.path.join(data_dir(), "custom-skin.css")
+        created = False
+        if not os.path.exists(path):
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self.CUSTOM_SKIN_TEMPLATE)
+                created = True
+            except OSError as exc:
+                return {"error": str(exc)}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                css = f.read()
+        except OSError as exc:
+            return {"error": str(exc)}
+        if len(css) > 512 * 1024:
+            return {"error": "custom-skin.css is too large (max 512 KB)."}
+        return {"css": css, "path": path, "created": created}
 
     # ---- PDF annotations (sidecar storage keyed by file path) ------------
     def _annos_all(self):

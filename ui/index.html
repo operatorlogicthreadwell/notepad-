@@ -23,7 +23,10 @@ try {
     <div class="dropdown">
       <div class="mi" data-cmd="new">New<span class="key">&#8984;N</span></div>
       <div class="mi" data-cmd="open">Open&hellip;<span class="key">&#8984;O</span></div>
+      <div class="mi" data-cmd="openFolder">Open Folder&hellip;</div>
       <div class="mi" data-cmd="pdfToText">Open PDF as Text</div>
+      <div class="sep"></div>
+      <div id="recent-menu"><!-- Recent files, filled by JS --></div>
       <div class="sep"></div>
       <div class="mi" data-cmd="openNote">Open Apple Note&hellip;</div>
       <div class="mi" data-cmd="sendToNotes">Send Tab to Apple Notes</div>
@@ -46,12 +49,24 @@ try {
       <div class="mi" data-cmd="paste">Paste<span class="key">&#8984;V</span></div>
       <div class="sep"></div>
       <div class="mi" data-cmd="selectAll">Select All<span class="key">&#8984;A</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="duplicateLine">Duplicate Line<span class="key">&#8984;D</span></div>
+      <div class="mi" data-cmd="moveLineUp">Move Line Up<span class="key">&#8997;&#8984;&#8593;</span></div>
+      <div class="mi" data-cmd="moveLineDown">Move Line Down<span class="key">&#8997;&#8984;&#8595;</span></div>
+      <div class="mi" data-cmd="deleteLine">Delete Line<span class="key">&#8679;&#8984;K</span></div>
+      <div class="mi" data-cmd="joinLines">Join Lines<span class="key">&#8984;J</span></div>
+      <div class="sep"></div>
+      <div class="mi" data-cmd="toggleComment">Toggle Comment<span class="key">&#8984;/</span></div>
+      <div class="mi" data-cmd="sortLines">Sort Lines</div>
+      <div class="mi" data-cmd="upperCase">UPPERCASE</div>
+      <div class="mi" data-cmd="lowerCase">lowercase</div>
     </div>
   </div>
   <div class="menu" data-menu="search">Search
     <div class="dropdown">
       <div class="mi" data-cmd="find">Find&hellip;<span class="key">&#8984;F</span></div>
       <div class="mi" data-cmd="replace">Replace&hellip;<span class="key">&#8997;&#8984;F</span></div>
+      <div class="mi" data-cmd="findInFiles">Find in Files&hellip;<span class="key">&#8679;&#8984;F</span></div>
       <div class="sep"></div>
       <div class="mi" data-cmd="findNext">Find Next<span class="key">&#8984;G</span></div>
       <div class="mi" data-cmd="findPrev">Find Previous<span class="key">&#8679;&#8984;G</span></div>
@@ -63,6 +78,8 @@ try {
     <div class="dropdown">
       <div class="mi check" data-cmd="toggleWrap" id="mi-wrap">Word Wrap</div>
       <div class="mi check" data-cmd="toggleLineNumbers" id="mi-linenumbers">Line Numbers</div>
+      <div class="mi check" data-cmd="toggleSidebar" id="mi-sidebar">Folder Sidebar</div>
+      <div class="mi check" data-cmd="toggleMdPreview" id="mi-mdpreview">Markdown Preview<span class="key">&#8679;&#8984;M</span></div>
       <div class="sep"></div>
       <div class="mi" data-cmd="zoomIn">Zoom In<span class="key">&#8984;+</span></div>
       <div class="mi" data-cmd="zoomOut">Zoom Out<span class="key">&#8984;&minus;</span></div>
@@ -75,6 +92,7 @@ try {
         <div class="mi check" data-cmd="skin" data-skin="solarized-dark">Skin: Solarized Dark</div>
         <div class="mi check" data-cmd="skin" data-skin="monokai">Skin: Monokai</div>
         <div class="mi check" data-cmd="skin" data-skin="matrix">Skin: Matrix</div>
+        <div class="mi check" data-cmd="skin" data-skin="custom">Skin: Custom&hellip;</div>
       </div>
     </div>
   </div>
@@ -84,6 +102,7 @@ try {
   <div class="menu" data-menu="decide">Decide
     <div class="dropdown">
       <div class="mi" data-cmd="aiAnalyze">Analyze Document<span class="key">&#8679;&#8984;A</span></div>
+      <div class="mi" data-cmd="aiAnalyzeSelection">Analyze Selection</div>
       <div class="mi" data-cmd="aiAsk">Ask About Document&hellip;</div>
       <div class="sep"></div>
       <div class="mi" data-cmd="aiSettings">AI Provider Settings&hellip;</div>
@@ -129,12 +148,27 @@ try {
 <!-- ===== Tab bar ===== -->
 <div id="tabbar"></div>
 
-<!-- ===== Main work area: editor/pdf column + dockable console + Decide panel ===== -->
+<!-- ===== Main work area: sidebar + editor/pdf column + dockable console + Decide panel ===== -->
 <div id="main-row">
+
+<!-- ===== Folder sidebar ===== -->
+<div id="sidebar" class="hidden">
+  <div id="sidebar-bar">
+    <span id="sidebar-title">Folder</span>
+    <button id="sidebar-refresh" title="Refresh">&#8635;</button>
+    <button id="sidebar-close" class="closebtn" title="Hide sidebar">&#10005;</button>
+  </div>
+  <div id="sidebar-tree"></div>
+  <div id="sidebar-resizer" title="Drag to resize"></div>
+</div>
+
 <div id="main-col">
 
-<!-- ===== Editor ===== -->
-<div id="editor-container"></div>
+<!-- ===== Editor (+ optional markdown preview) ===== -->
+<div id="editor-row">
+  <div id="editor-container"></div>
+  <div id="mdpreview" class="hidden"></div>
+</div>
 
 <!-- ===== PDF viewer ===== -->
 <div id="pdf-container" class="hidden">
@@ -176,6 +210,16 @@ try {
     <button id="btn-replace">Replace</button>
     <button id="btn-replace-all">Replace All</button>
   </div>
+</div>
+
+<!-- ===== Find in Files results ===== -->
+<div id="fifresults" class="hidden">
+  <div id="fif-bar">
+    <span id="fif-title">Find in Files</span>
+    <span id="fif-status"></span>
+    <button id="fif-close" class="closebtn" title="Hide results">&#10005;</button>
+  </div>
+  <div id="fif-out"></div>
 </div>
 
 <!-- ===== Run console ===== -->
@@ -241,6 +285,8 @@ Or ask a question about the document below.</div></div>
 <script src="vendor/codemirror/addon/search/searchcursor.min.js"></script>
 <script src="vendor/codemirror/addon/selection/active-line.min.js"></script>
 <script src="vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+<script src="vendor/codemirror/addon/comment/comment.min.js"></script>
 <script src="vendor/codemirror/mode/xml.min.js"></script>
 <script src="vendor/codemirror/mode/javascript.min.js"></script>
 <script src="vendor/codemirror/mode/css.min.js"></script>
