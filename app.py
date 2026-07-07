@@ -848,64 +848,60 @@ JSON.stringify(out.slice(0, 500));
         return True
 
 
-# Keep a reference so the Objective-C handler object isn't garbage-collected
-_OPEN_DOC_HANDLER = None
-
-
 def install_open_documents_handler(api):
     """Receive files double-clicked in Finder, at launch AND while running.
 
     PyInstaller's --argv-emulation only translates the open-documents Apple
     Event into argv at process start — a file double-clicked while the app
-    is already running was silently dropped (and the emulation itself is
-    flaky under windowed WKWebView apps). Registering a real handler for
-    the kAEOpenDocuments event fixes both: macOS queues the event through
-    app launch and delivers it once the run loop starts, and keeps
-    delivering later ones for as long as the app lives.
+    was already running produced Finder's "cannot open files in the 'Text
+    Document' format" error, because NSApplication routes that event to the
+    app delegate's application:openFiles: and pywebview's delegate doesn't
+    implement it. (Registering a raw kAEOpenDocuments handler before launch
+    doesn't help: NSApplication installs its own during finishLaunching and
+    clobbers it.)
+
+    The fix is to graft application:openFiles: onto pywebview's own cocoa
+    AppDelegate class, which is the officially routed path. We also reply
+    "success" to macOS so the error dialog can never reappear.
     """
-    global _OPEN_DOC_HANDLER
     if sys.platform != "darwin":
         return
     try:
-        from Foundation import NSObject, NSAppleEventManager, NSURL
+        import objc
         import AppKit
     except ImportError:
-        return  # pywebview's cocoa backend ships pyobjc; dev envs without it
+        return  # pywebview's cocoa backend ships pyobjc; other envs won't
 
-    fourcc = lambda code: int.from_bytes(code.encode("mac-roman"), "big")
-    K_CORE_EVENT = fourcc("aevt")
-    K_OPEN_DOCS = fourcc("odoc")
-    KEY_DIRECT_OBJECT = fourcc("----")
-    TYPE_FILE_URL = fourcc("furl")
+    def open_paths(paths):
+        try:
+            api.open_external([str(p) for p in paths])
+            AppKit.NSApp.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass  # never let an error travel back into the Apple Event reply
 
-    class OpenDocHandler(NSObject):
-        def handleOpenEvent_withReplyEvent_(self, event, reply):
-            paths = []
-            docs = event.paramDescriptorForKeyword_(KEY_DIRECT_OBJECT)
-            if docs is not None:
-                for i in range(1, docs.numberOfItems() + 1):
-                    item = docs.descriptorAtIndex_(i)
-                    if item is None:
-                        continue
-                    furl = item.coerceToDescriptorType_(TYPE_FILE_URL)
-                    if furl is None:
-                        continue
-                    url = NSURL.URLWithString_(furl.stringValue() or "")
-                    if url is not None and url.path():
-                        paths.append(str(url.path()))
-            if paths:
-                api.open_external(paths)
-            # Come to the front, like any Mac editor when handed a file
+    def application_openFiles_(self, app_obj, filenames):
+        try:
+            open_paths(list(filenames))
+        finally:
             try:
-                AppKit.NSApp.activateIgnoringOtherApps_(True)
+                # NSApplicationDelegateReplySuccess = 0 — tells Launch
+                # Services the documents were opened
+                app_obj.replyToOpenOrPrint_(0)
             except Exception:
                 pass
 
-    _OPEN_DOC_HANDLER = OpenDocHandler.alloc().init()
-    NSAppleEventManager.sharedAppleEventManager() \
-        .setEventHandler_andSelector_forEventClass_andEventID_(
-            _OPEN_DOC_HANDLER, b"handleOpenEvent:withReplyEvent:",
-            K_CORE_EVENT, K_OPEN_DOCS)
+    try:
+        from webview.platforms import cocoa as _cocoa
+        delegate_cls = _cocoa.BrowserView.AppDelegate
+        objc.classAddMethods(delegate_cls, [
+            objc.selector(application_openFiles_,
+                          selector=b"application:openFiles:",
+                          signature=b"v@:@@"),
+        ])
+    except Exception as exc:
+        # pywebview internals moved — better to run without Finder-open
+        # than to crash at startup
+        print("open-documents handler not installed:", exc, file=sys.stderr)
 
 
 def main():
